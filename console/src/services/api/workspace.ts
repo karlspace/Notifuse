@@ -113,6 +113,17 @@ export interface SMTPSettings {
   encrypted_oauth2_client_secret?: string
   oauth2_refresh_token?: string // Google only
   encrypted_oauth2_refresh_token?: string // Google only
+
+  // Optional: IMAP bounce mailbox polling
+  bounce_mailbox_host?: string
+  bounce_mailbox_port?: number
+  bounce_mailbox_tls?: boolean
+  bounce_mailbox_username?: string
+  bounce_mailbox_password?: string
+  encrypted_bounce_mailbox_username?: string
+  encrypted_bounce_mailbox_password?: string
+  bounce_mailbox_folder?: string
+  bounce_mailbox_poll_interval_mins?: number
 }
 
 export interface SparkPostSettings {

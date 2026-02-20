@@ -607,3 +607,164 @@ func TestSMTPWebhookPayload(t *testing.T) {
 	assert.Equal(t, payload.DiagnosticCode, decodedPayload.DiagnosticCode)
 	assert.Equal(t, payload.ComplaintType, decodedPayload.ComplaintType)
 }
+
+// Bounce mailbox tests
+
+func TestSMTPSettings_HasBounceMailbox(t *testing.T) {
+	s := &domain.SMTPSettings{}
+	assert.False(t, s.HasBounceMailbox())
+
+	s.BounceMailboxHost = "imap.example.com"
+	assert.True(t, s.HasBounceMailbox())
+}
+
+func TestSMTPSettings_EncryptDecryptBounceMailboxUsername(t *testing.T) {
+	passphrase := "test-passphrase"
+	username := "bounce@example.com"
+
+	settings := &domain.SMTPSettings{
+		BounceMailboxUsername: username,
+	}
+
+	err := settings.EncryptBounceMailboxUsername(passphrase)
+	require.NoError(t, err)
+	assert.NotEmpty(t, settings.EncryptedBounceMailboxUsername)
+
+	settings.BounceMailboxUsername = ""
+	err = settings.DecryptBounceMailboxUsername(passphrase)
+	require.NoError(t, err)
+	assert.Equal(t, username, settings.BounceMailboxUsername)
+
+	// Wrong passphrase
+	settings.BounceMailboxUsername = ""
+	err = settings.DecryptBounceMailboxUsername("wrong")
+	assert.Error(t, err)
+}
+
+func TestSMTPSettings_EncryptDecryptBounceMailboxPassword(t *testing.T) {
+	passphrase := "test-passphrase"
+	password := "bounce-secret"
+
+	settings := &domain.SMTPSettings{
+		BounceMailboxPassword: password,
+	}
+
+	err := settings.EncryptBounceMailboxPassword(passphrase)
+	require.NoError(t, err)
+	assert.NotEmpty(t, settings.EncryptedBounceMailboxPassword)
+
+	settings.BounceMailboxPassword = ""
+	err = settings.DecryptBounceMailboxPassword(passphrase)
+	require.NoError(t, err)
+	assert.Equal(t, password, settings.BounceMailboxPassword)
+
+	// Wrong passphrase
+	settings.BounceMailboxPassword = ""
+	err = settings.DecryptBounceMailboxPassword("wrong")
+	assert.Error(t, err)
+}
+
+func TestSMTPSettings_ValidateBounceMailbox(t *testing.T) {
+	passphrase := "test-passphrase"
+
+	t.Run("valid config", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:     "imap.example.com",
+			BounceMailboxPort:     993,
+			BounceMailboxUsername: "bounce@example.com",
+			BounceMailboxPassword: "secret",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		require.NoError(t, err)
+		assert.Equal(t, "INBOX", s.BounceMailboxFolder)
+		assert.Equal(t, 5, s.BounceMailboxPollIntervalMins)
+		assert.NotEmpty(t, s.EncryptedBounceMailboxUsername)
+		assert.NotEmpty(t, s.EncryptedBounceMailboxPassword)
+	})
+
+	t.Run("missing username", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:     "imap.example.com",
+			BounceMailboxPassword: "secret",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "username is required")
+	})
+
+	t.Run("missing password", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:     "imap.example.com",
+			BounceMailboxUsername: "user",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "password is required")
+	})
+
+	t.Run("defaults applied", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:     "imap.example.com",
+			BounceMailboxUsername: "user",
+			BounceMailboxPassword: "pass",
+			BounceMailboxPort:     0,
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		require.NoError(t, err)
+		assert.Equal(t, 993, s.BounceMailboxPort)
+		assert.Equal(t, "INBOX", s.BounceMailboxFolder)
+		assert.Equal(t, 5, s.BounceMailboxPollIntervalMins)
+	})
+
+	t.Run("custom folder and interval", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:            "imap.example.com",
+			BounceMailboxUsername:        "user",
+			BounceMailboxPassword:        "pass",
+			BounceMailboxFolder:          "Bounces",
+			BounceMailboxPollIntervalMins: 10,
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		require.NoError(t, err)
+		assert.Equal(t, "Bounces", s.BounceMailboxFolder)
+		assert.Equal(t, 10, s.BounceMailboxPollIntervalMins)
+	})
+}
+
+func TestSMTPSettings_Validate_WithBounceMailbox(t *testing.T) {
+	passphrase := "test-passphrase"
+
+	t.Run("valid SMTP with bounce mailbox", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			Host:                  "smtp.example.com",
+			Port:                  587,
+			BounceMailboxHost:     "imap.example.com",
+			BounceMailboxUsername: "bounce@example.com",
+			BounceMailboxPassword: "secret",
+		}
+		err := s.Validate(passphrase)
+		require.NoError(t, err)
+		assert.NotEmpty(t, s.EncryptedBounceMailboxUsername)
+	})
+
+	t.Run("valid SMTP without bounce mailbox", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			Host: "smtp.example.com",
+			Port: 587,
+		}
+		err := s.Validate(passphrase)
+		require.NoError(t, err)
+	})
+
+	t.Run("invalid bounce mailbox in valid SMTP", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			Host:              "smtp.example.com",
+			Port:              587,
+			BounceMailboxHost: "imap.example.com",
+			// Missing username/password
+		}
+		err := s.Validate(passphrase)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "username is required")
+	})
+}

@@ -188,6 +188,18 @@ func (e *EmailProvider) EncryptSecretKeys(passphrase string) error {
 			}
 			e.SMTP.OAuth2RefreshToken = ""
 		}
+		if e.SMTP.BounceMailboxUsername != "" {
+			if err := e.SMTP.EncryptBounceMailboxUsername(passphrase); err != nil {
+				return err
+			}
+			e.SMTP.BounceMailboxUsername = ""
+		}
+		if e.SMTP.BounceMailboxPassword != "" {
+			if err := e.SMTP.EncryptBounceMailboxPassword(passphrase); err != nil {
+				return err
+			}
+			e.SMTP.BounceMailboxPassword = ""
+		}
 	}
 
 	if e.Kind == EmailProviderKindSparkPost && e.SparkPost != nil && e.SparkPost.APIKey != "" {
@@ -263,6 +275,16 @@ func (e *EmailProvider) DecryptSecretKeys(passphrase string) error {
 		}
 		if e.SMTP.EncryptedOAuth2RefreshToken != "" {
 			if err := e.SMTP.DecryptOAuth2RefreshToken(passphrase); err != nil {
+				return err
+			}
+		}
+		if e.SMTP.EncryptedBounceMailboxUsername != "" {
+			if err := e.SMTP.DecryptBounceMailboxUsername(passphrase); err != nil {
+				return err
+			}
+		}
+		if e.SMTP.EncryptedBounceMailboxPassword != "" {
+			if err := e.SMTP.DecryptBounceMailboxPassword(passphrase); err != nil {
 				return err
 			}
 		}

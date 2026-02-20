@@ -49,6 +49,17 @@ type SMTPSettings struct {
 	// Runtime decrypted OAuth2 secrets (not stored in database)
 	OAuth2ClientSecret string `json:"oauth2_client_secret,omitempty"` // Decrypted client secret
 	OAuth2RefreshToken string `json:"oauth2_refresh_token,omitempty"` // Decrypted refresh token (Google)
+
+	// Optional: IMAP bounce mailbox polling
+	BounceMailboxHost              string `json:"bounce_mailbox_host,omitempty"`
+	BounceMailboxPort              int    `json:"bounce_mailbox_port,omitempty"`
+	BounceMailboxTLS               bool   `json:"bounce_mailbox_tls,omitempty"`
+	EncryptedBounceMailboxUsername string `json:"encrypted_bounce_mailbox_username,omitempty"`
+	EncryptedBounceMailboxPassword string `json:"encrypted_bounce_mailbox_password,omitempty"`
+	BounceMailboxUsername          string `json:"bounce_mailbox_username,omitempty"`  // runtime only
+	BounceMailboxPassword          string `json:"bounce_mailbox_password,omitempty"` // runtime only
+	BounceMailboxFolder            string `json:"bounce_mailbox_folder,omitempty"`   // default: "INBOX"
+	BounceMailboxPollIntervalMins  int    `json:"bounce_mailbox_poll_interval_mins,omitempty"` // default: 5
 }
 
 func (s *SMTPSettings) DecryptUsername(passphrase string) error {
@@ -125,6 +136,82 @@ func (s *SMTPSettings) EncryptOAuth2RefreshToken(passphrase string) error {
 	return nil
 }
 
+// Bounce mailbox credential encryption/decryption
+
+func (s *SMTPSettings) DecryptBounceMailboxUsername(passphrase string) error {
+	username, err := crypto.DecryptFromHexString(s.EncryptedBounceMailboxUsername, passphrase)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt bounce mailbox username: %w", err)
+	}
+	s.BounceMailboxUsername = username
+	return nil
+}
+
+func (s *SMTPSettings) EncryptBounceMailboxUsername(passphrase string) error {
+	encrypted, err := crypto.EncryptString(s.BounceMailboxUsername, passphrase)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt bounce mailbox username: %w", err)
+	}
+	s.EncryptedBounceMailboxUsername = encrypted
+	return nil
+}
+
+func (s *SMTPSettings) DecryptBounceMailboxPassword(passphrase string) error {
+	password, err := crypto.DecryptFromHexString(s.EncryptedBounceMailboxPassword, passphrase)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt bounce mailbox password: %w", err)
+	}
+	s.BounceMailboxPassword = password
+	return nil
+}
+
+func (s *SMTPSettings) EncryptBounceMailboxPassword(passphrase string) error {
+	encrypted, err := crypto.EncryptString(s.BounceMailboxPassword, passphrase)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt bounce mailbox password: %w", err)
+	}
+	s.EncryptedBounceMailboxPassword = encrypted
+	return nil
+}
+
+// HasBounceMailbox returns true if a bounce mailbox is configured
+func (s *SMTPSettings) HasBounceMailbox() bool {
+	return s.BounceMailboxHost != ""
+}
+
+// ValidateBounceMailbox validates the bounce mailbox configuration and encrypts credentials
+func (s *SMTPSettings) ValidateBounceMailbox(passphrase string) error {
+	if s.BounceMailboxPort <= 0 || s.BounceMailboxPort > 65535 {
+		s.BounceMailboxPort = 993
+	}
+
+	if s.BounceMailboxUsername == "" {
+		return fmt.Errorf("bounce mailbox username is required")
+	}
+
+	if s.BounceMailboxPassword == "" {
+		return fmt.Errorf("bounce mailbox password is required")
+	}
+
+	if s.BounceMailboxFolder == "" {
+		s.BounceMailboxFolder = "INBOX"
+	}
+
+	if s.BounceMailboxPollIntervalMins < 1 {
+		s.BounceMailboxPollIntervalMins = 5
+	}
+
+	if err := s.EncryptBounceMailboxUsername(passphrase); err != nil {
+		return err
+	}
+
+	if err := s.EncryptBounceMailboxPassword(passphrase); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s *SMTPSettings) Validate(passphrase string) error {
 	if s.Host == "" {
 		return fmt.Errorf("host is required for SMTP configuration")
@@ -151,6 +238,13 @@ func (s *SMTPSettings) Validate(passphrase string) error {
 	if s.Password != "" {
 		if err := s.EncryptPassword(passphrase); err != nil {
 			return fmt.Errorf("failed to encrypt SMTP password: %w", err)
+		}
+	}
+
+	// Validate bounce mailbox if configured
+	if s.BounceMailboxHost != "" {
+		if err := s.ValidateBounceMailbox(passphrase); err != nil {
+			return err
 		}
 	}
 
@@ -202,6 +296,13 @@ func (s *SMTPSettings) validateOAuth2(passphrase string) error {
 	if s.OAuth2RefreshToken != "" {
 		if err := s.EncryptOAuth2RefreshToken(passphrase); err != nil {
 			return fmt.Errorf("failed to encrypt OAuth2 refresh token: %w", err)
+		}
+	}
+
+	// Validate bounce mailbox if configured
+	if s.BounceMailboxHost != "" {
+		if err := s.ValidateBounceMailbox(passphrase); err != nil {
+			return err
 		}
 	}
 

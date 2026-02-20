@@ -153,6 +153,7 @@ type App struct {
 	webhookDeliveryWorker            *service.WebhookDeliveryWorker
 	automationService                *service.AutomationService
 	automationScheduler              *service.AutomationScheduler
+	smtpBouncePoller                 *service.SMTPBouncePoller
 	llmService                       *service.LLMService
 	emailQueueWorker                 *queue.EmailQueueWorker
 	dataFeedFetcher                  broadcast.DataFeedFetcher
@@ -966,6 +967,14 @@ func (a *App) InitServices() error {
 		a.config.AutomationScheduler.BatchSize,
 	)
 
+	// Initialize SMTP bounce mailbox poller
+	a.smtpBouncePoller = service.NewSMTPBouncePoller(
+		a.workspaceRepo,
+		a.inboundWebhookEventService,
+		a.logger,
+		1*time.Minute,
+	)
+
 	// Initialize SMTP relay handler service
 	a.smtpRelayHandlerService = service.NewSMTPRelayHandlerService(
 		a.authService,
@@ -1347,6 +1356,25 @@ func (a *App) Start() error {
 		}()
 	}
 
+	// Start SMTP bounce mailbox poller
+	if a.smtpBouncePoller != nil && !a.config.IsDemo() {
+		go func() {
+			ctx := a.GetShutdownContext()
+			select {
+			case <-time.After(30 * time.Second):
+				// continue
+			case <-ctx.Done():
+				a.logger.Info("Server shutdown during SMTP bounce poller delay")
+				return
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			a.logger.Info("Starting SMTP bounce mailbox poller")
+			a.smtpBouncePoller.Start(ctx)
+		}()
+	}
+
 	// Start the server based on SSL configuration
 	if a.config.Server.SSL.Enabled {
 		a.logger.WithField("cert_file", a.config.Server.SSL.CertFile).Info("SSL enabled")
@@ -1378,6 +1406,12 @@ func (a *App) Shutdown(ctx context.Context) error {
 	if a.automationScheduler != nil {
 		a.logger.Info("Stopping automation scheduler...")
 		a.automationScheduler.Stop()
+	}
+
+	// Stop SMTP bounce mailbox poller
+	if a.smtpBouncePoller != nil {
+		a.logger.Info("Stopping SMTP bounce mailbox poller...")
+		a.smtpBouncePoller.Stop()
 	}
 
 	// Stop email queue worker

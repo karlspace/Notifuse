@@ -17,6 +17,7 @@ import {
   Dropdown,
   Popconfirm,
   Card,
+  Collapse,
   Spin,
   Tooltip,
   Row,
@@ -1701,6 +1702,104 @@ export function Integrations({ workspace, onSave, loading, isOwner }: Integratio
                 )
               }}
             </Form.Item>
+
+            <Collapse
+              ghost
+              items={[
+                {
+                  key: 'bounce',
+                  label: t`Bounce Mailbox (Optional)`,
+                  children: (
+                    <>
+                      <p style={{ marginBottom: 16, color: '#888' }}>
+                        {t`Configure an IMAP mailbox to automatically detect bounced emails. The system will poll this mailbox periodically and process bounce notifications.`}
+                      </p>
+                      <Row gutter={16}>
+                        <Col span={10}>
+                          <Form.Item
+                            name={['smtp', 'bounce_mailbox_host']}
+                            label={t`IMAP Host`}
+                          >
+                            <Input
+                              placeholder="imap.yourdomain.com"
+                              disabled={!isOwner}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={6}>
+                          <Form.Item
+                            name={['smtp', 'bounce_mailbox_port']}
+                            label={t`IMAP Port`}
+                          >
+                            <InputNumber
+                              min={1}
+                              max={65535}
+                              placeholder="993"
+                              disabled={!isOwner}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={4}>
+                          <Form.Item
+                            name={['smtp', 'bounce_mailbox_tls']}
+                            valuePropName="checked"
+                            label={t`Use TLS`}
+                            initialValue={true}
+                          >
+                            <Switch defaultChecked disabled={!isOwner} />
+                          </Form.Item>
+                        </Col>
+                        <Col span={4}>
+                          <Form.Item
+                            name={['smtp', 'bounce_mailbox_poll_interval_mins']}
+                            label={t`Poll (min)`}
+                          >
+                            <InputNumber
+                              min={1}
+                              max={60}
+                              placeholder="5"
+                              disabled={!isOwner}
+                            />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                      <Row gutter={16}>
+                        <Col span={8}>
+                          <Form.Item
+                            name={['smtp', 'bounce_mailbox_username']}
+                            label={t`Username`}
+                          >
+                            <Input
+                              placeholder={t`Mailbox username`}
+                              disabled={!isOwner}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={8}>
+                          <Form.Item
+                            name={['smtp', 'bounce_mailbox_password']}
+                            label={t`Password`}
+                          >
+                            <Input.Password
+                              placeholder={t`Mailbox password`}
+                              disabled={!isOwner}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={8}>
+                          <Form.Item
+                            name={['smtp', 'bounce_mailbox_folder']}
+                            label={t`Folder`}
+                          >
+                            <Input placeholder="INBOX" disabled={!isOwner} />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </>
+                  )
+                }
+              ]}
+            />
           </>
         )}
 
@@ -1937,6 +2036,14 @@ export function Integrations({ workspace, onSave, loading, isOwner }: Integratio
           )}
         </Descriptions.Item>
       )
+      if (provider.smtp.bounce_mailbox_host) {
+        items.push(
+          <Descriptions.Item key="bounce" label={t`Bounce Mailbox`}>
+            {provider.smtp.bounce_mailbox_host}:{provider.smtp.bounce_mailbox_port || 993}
+            {' '}({t`every`} {provider.smtp.bounce_mailbox_poll_interval_mins || 5} {t`min`})
+          </Descriptions.Item>
+        )
+      }
     } else if (provider.kind === 'ses' && provider.ses) {
       items.push(
         <Descriptions.Item key="region" label={t`AWS Region`}>
