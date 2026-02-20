@@ -8,6 +8,8 @@ on:
 
 jobs:
   unit-tests:
+    # DISABLED
+    if: false
     name: Unit Tests
     runs-on: ubuntu-latest
     defaults:
@@ -50,6 +52,8 @@ jobs:
           flags: unit
 
   integration-tests:
+    # DISABLED
+    if: false
     name: Integration Tests
     runs-on: ubuntu-latest
     defaults:

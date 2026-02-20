@@ -12,6 +12,8 @@ env:
 
 jobs:
   build-and-push:
+    # DISABLED
+    if: false
     runs-on: ubuntu-latest
     permissions:
       contents: read

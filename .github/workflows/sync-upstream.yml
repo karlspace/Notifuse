@@ -1,0 +1,139 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: "0 4 1 * *" # Monatlich am 1. um 4:00 UTC
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Upstream ref to sync from (branch or tag, e.g. 'main' or 'v6.5')"
+        required: false
+        default: "main"
+      target_branch:
+        description: "Target branch to sync to"
+        required: false
+        default: "workspace/current"
+
+jobs:
+  sync:
+    name: Sync with Upstream
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.target_branch || 'workspace/current' }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/Notifuse/notifuse.git 2>/dev/null || git remote set-url upstream https://github.com/Notifuse/notifuse.git
+
+      - name: Fetch upstream
+        run: git fetch upstream
+
+      - name: Check for conflicts
+        id: check_conflicts
+        env:
+          UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'main' }}
+          TARGET_BRANCH: ${{ github.event.inputs.target_branch || 'workspace/current' }}
+        run: |
+          echo "Attempting to merge upstream/$UPSTREAM_REF into $TARGET_BRANCH"
+
+          # Versuche Merge
+          if git merge upstream/$UPSTREAM_REF --no-commit --no-ff; then
+            echo "merge_status=success" >> $GITHUB_OUTPUT
+            git merge --continue --no-edit || git commit -m "chore: sync with upstream/$UPSTREAM_REF"
+          else
+            echo "merge_status=conflict" >> $GITHUB_OUTPUT
+            git merge --abort
+          fi
+
+      - name: Push changes
+        if: steps.check_conflicts.outputs.merge_status == 'success'
+        env:
+          TARGET_BRANCH: ${{ github.event.inputs.target_branch || 'workspace/current' }}
+        run: |
+          git push origin $TARGET_BRANCH
+
+      - name: Create issue on conflict
+        if: steps.check_conflicts.outputs.merge_status == 'conflict'
+        uses: actions/github-script@v7
+        env:
+          UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'main' }}
+          TARGET_BRANCH: ${{ github.event.inputs.target_branch || 'workspace/current' }}
+        with:
+          script: |
+            const upstreamRef = process.env.UPSTREAM_REF;
+            const targetBranch = process.env.TARGET_BRANCH;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `⚠️ Merge conflict: upstream/${upstreamRef} → ${targetBranch}`,
+              body: `## Automatisches Upstream-Sync fehlgeschlagen
+
+            **Upstream Ref:** \`${upstreamRef}\`
+            **Target Branch:** \`${targetBranch}\`
+            **Workflow Run:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
+
+            ### Manuelle Auflösung erforderlich
+
+            \`\`\`bash
+            git checkout ${targetBranch}
+            git fetch upstream
+            git merge upstream/${upstreamRef}
+            # Konflikte auflösen
+            git commit
+            git push origin ${targetBranch}
+            \`\`\`
+            `,
+              labels: ['sync', 'conflict', 'automated']
+            });
+
+      - name: Trigger Docker build
+        if: steps.check_conflicts.outputs.merge_status == 'success'
+        uses: actions/github-script@v7
+        env:
+          TARGET_BRANCH: ${{ github.event.inputs.target_branch || 'workspace/current' }}
+        with:
+          script: |
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'fork-docker-build.yml',
+                ref: process.env.TARGET_BRANCH
+              });
+              console.log('Docker build triggered successfully');
+            } catch (error) {
+              console.log('Docker build workflow not found or could not be triggered:', error.message);
+            }
+
+      - name: Summary
+        if: always()
+        env:
+          MERGE_STATUS: ${{ steps.check_conflicts.outputs.merge_status }}
+          UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'main' }}
+          TARGET_BRANCH: ${{ github.event.inputs.target_branch || 'workspace/current' }}
+        run: |
+          echo "## Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Upstream Ref:** $UPSTREAM_REF" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Branch:** $TARGET_BRANCH" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** $MERGE_STATUS" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$MERGE_STATUS" == "success" ]; then
+            echo "✅ Upstream sync successful!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Merge conflict - manual resolution required" >> $GITHUB_STEP_SUMMARY
+          fi
