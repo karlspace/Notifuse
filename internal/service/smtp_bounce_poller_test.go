@@ -427,3 +427,103 @@ func TestSMTPBouncePoller_WorkspaceListError(t *testing.T) {
 	poller.pollAll(context.Background())
 	assert.Empty(t, webhookSvc.getCalls())
 }
+
+func buildTestARFMessage(recipient, feedbackType, messageID string) []byte {
+	return []byte("From: feedback@isp.example.com\r\n" +
+		"Subject: Complaint\r\n" +
+		"Content-Type: multipart/report; report-type=feedback-report; boundary=\"arfbnd\"\r\n" +
+		"\r\n" +
+		"--arfbnd\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Spam complaint.\r\n" +
+		"\r\n" +
+		"--arfbnd\r\n" +
+		"Content-Type: message/feedback-report\r\n" +
+		"\r\n" +
+		"Feedback-Type: " + feedbackType + "\r\n" +
+		"Version: 1\r\n" +
+		"Original-Rcpt-To: " + recipient + "\r\n" +
+		"\r\n" +
+		"--arfbnd\r\n" +
+		"Content-Type: message/rfc822\r\n" +
+		"\r\n" +
+		"Message-Id: <" + messageID + ">\r\n" +
+		"\r\n" +
+		"--arfbnd--\r\n")
+}
+
+func TestSMTPBouncePoller_ProcessesComplaintMessages(t *testing.T) {
+	mockClient := &mockIMAPClient{
+		messages: []IMAPMessage{
+			{UID: 1, RawBody: buildTestARFMessage("complainer@example.com", "abuse", "spam-msg-001@sender.com")},
+		},
+	}
+
+	webhookSvc := &mockWebhookService{}
+	workspaceRepo := &mockBounceWorkspaceRepo{
+		workspaces: []*domain.Workspace{createTestWorkspaceWithBounceMailbox()},
+	}
+
+	poller := NewSMTPBouncePoller(workspaceRepo, webhookSvc, &noopLogger{}, 1*time.Minute)
+	poller.newIMAPClient = func() IMAPClient { return mockClient }
+
+	poller.pollAll(context.Background())
+
+	calls := webhookSvc.getCalls()
+	require.Len(t, calls, 1)
+
+	var payload domain.SMTPWebhookPayload
+	err := json.Unmarshal(calls[0].payload, &payload)
+	require.NoError(t, err)
+	assert.Equal(t, "complaint", payload.Event)
+	assert.Equal(t, "complainer@example.com", payload.Recipient)
+	assert.Equal(t, "abuse", payload.ComplaintType)
+	assert.Equal(t, "spam-msg-001@sender.com", payload.MessageID)
+	assert.Equal(t, "ws-test", calls[0].workspaceID)
+	assert.Equal(t, "int-smtp-1", calls[0].integrationID)
+
+	assert.Len(t, mockClient.seenUIDs, 1)
+	assert.True(t, mockClient.closed)
+}
+
+func TestSMTPBouncePoller_MixedBounceAndComplaint(t *testing.T) {
+	mockClient := &mockIMAPClient{
+		messages: []IMAPMessage{
+			{UID: 1, RawBody: buildTestDSNMessage("bounced@example.org", "5.1.1", "msg-001@sender.com")},
+			{UID: 2, RawBody: buildTestARFMessage("complainer@example.com", "abuse", "spam-001@sender.com")},
+			{UID: 3, RawBody: []byte("From: alice@example.com\r\nSubject: Hello\r\nContent-Type: text/plain\r\n\r\nRegular email.\r\n")},
+		},
+	}
+
+	webhookSvc := &mockWebhookService{}
+	workspaceRepo := &mockBounceWorkspaceRepo{
+		workspaces: []*domain.Workspace{createTestWorkspaceWithBounceMailbox()},
+	}
+
+	poller := NewSMTPBouncePoller(workspaceRepo, webhookSvc, &noopLogger{}, 1*time.Minute)
+	poller.newIMAPClient = func() IMAPClient { return mockClient }
+
+	poller.pollAll(context.Background())
+
+	calls := webhookSvc.getCalls()
+	require.Len(t, calls, 2)
+
+	// First call should be bounce
+	var payload1 domain.SMTPWebhookPayload
+	err := json.Unmarshal(calls[0].payload, &payload1)
+	require.NoError(t, err)
+	assert.Equal(t, "bounce", payload1.Event)
+	assert.Equal(t, "bounced@example.org", payload1.Recipient)
+
+	// Second call should be complaint
+	var payload2 domain.SMTPWebhookPayload
+	err = json.Unmarshal(calls[1].payload, &payload2)
+	require.NoError(t, err)
+	assert.Equal(t, "complaint", payload2.Event)
+	assert.Equal(t, "complainer@example.com", payload2.Recipient)
+	assert.Equal(t, "abuse", payload2.ComplaintType)
+
+	// All 3 messages should be marked as seen
+	assert.Len(t, mockClient.seenUIDs, 3)
+}

@@ -266,3 +266,223 @@ func TestParseDSN_TextRFC822Headers(t *testing.T) {
 
 	assert.Equal(t, "headers-only@sender.com", info.OriginalMessageID)
 }
+
+// --- ARF / Complaint Parsing Tests ---
+
+func TestParseARF_StandardRFC5965_Abuse(t *testing.T) {
+	raw := []byte("From: feedback@isp.example.com\r\n" +
+		"To: abuse@sender.example.com\r\n" +
+		"Subject: Complaint about message from 192.0.2.1\r\n" +
+		"Content-Type: multipart/report; report-type=feedback-report; boundary=\"arf-boundary\"\r\n" +
+		"\r\n" +
+		"--arf-boundary\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"This is a spam complaint from one of our users.\r\n" +
+		"\r\n" +
+		"--arf-boundary\r\n" +
+		"Content-Type: message/feedback-report\r\n" +
+		"\r\n" +
+		"Feedback-Type: abuse\r\n" +
+		"User-Agent: ISP/1.0\r\n" +
+		"Version: 1\r\n" +
+		"Original-Mail-From: marketing@sender.example.com\r\n" +
+		"Original-Rcpt-To: rfc822;recipient@isp.example.com\r\n" +
+		"Arrival-Date: Thu, 8 Mar 2005 14:00:00 -0500\r\n" +
+		"Source-IP: 192.0.2.1\r\n" +
+		"Reported-Domain: sender.example.com\r\n" +
+		"\r\n" +
+		"--arf-boundary\r\n" +
+		"Content-Type: message/rfc822\r\n" +
+		"\r\n" +
+		"Message-Id: <original-spam-123@sender.example.com>\r\n" +
+		"From: marketing@sender.example.com\r\n" +
+		"To: recipient@isp.example.com\r\n" +
+		"Subject: Buy now!\r\n" +
+		"\r\n" +
+		"--arf-boundary--\r\n")
+
+	info, err := ParseARF(raw)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+
+	assert.Equal(t, "abuse", info.FeedbackType)
+	assert.Equal(t, "recipient@isp.example.com", info.OriginalRecipient)
+	assert.Equal(t, "original-spam-123@sender.example.com", info.OriginalMessageID)
+	assert.Equal(t, "ISP/1.0", info.UserAgent)
+	assert.Equal(t, "192.0.2.1", info.SourceIP)
+	assert.Equal(t, "sender.example.com", info.ReportedDomain)
+	assert.Equal(t, "Thu, 8 Mar 2005 14:00:00 -0500", info.ArrivalDate)
+}
+
+func TestParseARF_FraudFeedbackType(t *testing.T) {
+	raw := []byte("From: feedback@isp.example.com\r\n" +
+		"Subject: Fraud report\r\n" +
+		"Content-Type: multipart/report; report-type=feedback-report; boundary=\"fraud-bnd\"\r\n" +
+		"\r\n" +
+		"--fraud-bnd\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Fraud complaint.\r\n" +
+		"\r\n" +
+		"--fraud-bnd\r\n" +
+		"Content-Type: message/feedback-report\r\n" +
+		"\r\n" +
+		"Feedback-Type: fraud\r\n" +
+		"User-Agent: FraudDetector/2.0\r\n" +
+		"Version: 1\r\n" +
+		"Original-Rcpt-To: victim@example.com\r\n" +
+		"\r\n" +
+		"--fraud-bnd\r\n" +
+		"Content-Type: message/rfc822\r\n" +
+		"\r\n" +
+		"Message-Id: <fraud-msg@phisher.com>\r\n" +
+		"\r\n" +
+		"--fraud-bnd--\r\n")
+
+	info, err := ParseARF(raw)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+
+	assert.Equal(t, "fraud", info.FeedbackType)
+	assert.Equal(t, "victim@example.com", info.OriginalRecipient)
+	assert.Equal(t, "fraud-msg@phisher.com", info.OriginalMessageID)
+}
+
+func TestParseARF_NonComplaintMessage(t *testing.T) {
+	raw := []byte("From: alice@example.com\r\n" +
+		"To: bob@example.com\r\n" +
+		"Subject: Hello!\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Just a regular email.\r\n")
+
+	info, err := ParseARF(raw)
+	assert.NoError(t, err)
+	assert.Nil(t, info)
+}
+
+func TestParseARF_HeuristicComplaint_SubjectMatch(t *testing.T) {
+	raw := []byte("From: abuse-team@isp.com\r\n" +
+		"To: postmaster@sender.com\r\n" +
+		"Subject: Spam complaint regarding your message\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"We received a spam complaint about a message sent to:\r\n" +
+		"  complainer@isp.com\r\n" +
+		"\r\n" +
+		"Message-ID: <spammy-msg@sender.com>\r\n" +
+		"Please investigate.\r\n")
+
+	info, err := ParseARF(raw)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+
+	assert.Equal(t, "abuse", info.FeedbackType)
+	assert.Equal(t, "complainer@isp.com", info.OriginalRecipient)
+	assert.Equal(t, "spammy-msg@sender.com", info.OriginalMessageID)
+}
+
+func TestParseARF_HeuristicComplaint_XComplaintsToHeader(t *testing.T) {
+	raw := []byte("From: fbl@isp.com\r\n" +
+		"To: postmaster@sender.com\r\n" +
+		"Subject: Notification\r\n" +
+		"X-Complaints-To: abuse@isp.com\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"User user@isp.com reported your message as spam.\r\n")
+
+	info, err := ParseARF(raw)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+
+	assert.Equal(t, "abuse", info.FeedbackType)
+	assert.Equal(t, "user@isp.com", info.OriginalRecipient)
+}
+
+func TestParseARF_MalformedMessage(t *testing.T) {
+	raw := []byte("not a valid email at all")
+	info, err := ParseARF(raw)
+	assert.Error(t, err)
+	assert.Nil(t, info)
+}
+
+func TestParseARF_MissingFeedbackType(t *testing.T) {
+	raw := []byte("From: feedback@isp.com\r\n" +
+		"Subject: Report\r\n" +
+		"Content-Type: multipart/report; report-type=feedback-report; boundary=\"empty-fb\"\r\n" +
+		"\r\n" +
+		"--empty-fb\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Something.\r\n" +
+		"\r\n" +
+		"--empty-fb\r\n" +
+		"Content-Type: message/feedback-report\r\n" +
+		"\r\n" +
+		"User-Agent: ISP/1.0\r\n" +
+		"Version: 1\r\n" +
+		"\r\n" +
+		"--empty-fb--\r\n")
+
+	info, err := ParseARF(raw)
+	assert.NoError(t, err)
+	assert.Nil(t, info)
+}
+
+func TestParseARF_RecipientFromOriginalMessage(t *testing.T) {
+	raw := []byte("From: feedback@isp.com\r\n" +
+		"Subject: Complaint\r\n" +
+		"Content-Type: multipart/report; report-type=feedback-report; boundary=\"norecip\"\r\n" +
+		"\r\n" +
+		"--norecip\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Complaint.\r\n" +
+		"\r\n" +
+		"--norecip\r\n" +
+		"Content-Type: message/feedback-report\r\n" +
+		"\r\n" +
+		"Feedback-Type: abuse\r\n" +
+		"Version: 1\r\n" +
+		"\r\n" +
+		"--norecip\r\n" +
+		"Content-Type: message/rfc822\r\n" +
+		"\r\n" +
+		"Message-Id: <abc@sender.com>\r\n" +
+		"From: sender@sender.com\r\n" +
+		"To: complainer@isp.com\r\n" +
+		"\r\n" +
+		"--norecip--\r\n")
+
+	info, err := ParseARF(raw)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+
+	assert.Equal(t, "abuse", info.FeedbackType)
+	assert.Equal(t, "complainer@isp.com", info.OriginalRecipient)
+	assert.Equal(t, "abc@sender.com", info.OriginalMessageID)
+}
+
+func TestParseARF_DSNBounceNotDetectedAsComplaint(t *testing.T) {
+	raw := []byte("From: mailer-daemon@example.com\r\n" +
+		"Subject: Delivery Status Notification (Failure)\r\n" +
+		"Content-Type: multipart/report; report-type=delivery-status; boundary=\"dsnbnd\"\r\n" +
+		"\r\n" +
+		"--dsnbnd\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Your message could not be delivered.\r\n" +
+		"\r\n" +
+		"--dsnbnd\r\n" +
+		"Content-Type: message/delivery-status\r\n" +
+		"\r\n" +
+		"Final-Recipient: rfc822;bounced@example.org\r\n" +
+		"Status: 5.1.1\r\n" +
+		"\r\n" +
+		"--dsnbnd--\r\n")
+
+	info, err := ParseARF(raw)
+	assert.NoError(t, err)
+	assert.Nil(t, info)
+}

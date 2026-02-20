@@ -21,6 +21,17 @@ type BounceInfo struct {
 	IsHardBounce      bool   // true if Status starts with "5."
 }
 
+// ComplaintInfo holds parsed complaint/feedback information from an ARF message (RFC 5965)
+type ComplaintInfo struct {
+	FeedbackType      string // "abuse", "fraud", "virus", "other", "not-spam"
+	OriginalRecipient string // Original-Rcpt-To or extracted from original message
+	OriginalMessageID string // Message-ID of the original reported message
+	UserAgent         string // ISP/tool that generated the report
+	SourceIP          string // Source-IP from the feedback report
+	ArrivalDate       string // Arrival-Date of the original message
+	ReportedDomain    string // Reported-Domain field
+}
+
 var emailRegex = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
 
 // ParseDSN parses a raw email message and extracts bounce information.
@@ -272,4 +283,233 @@ func truncateDiagnostic(body string) string {
 		return body[:500]
 	}
 	return body
+}
+
+// ParseARF parses a raw email message and extracts spam complaint / abuse report information.
+// Handles RFC 5965 ARF (Abuse Reporting Format) messages and heuristic fallback.
+// Returns nil, nil if the message is not a complaint notification.
+func ParseARF(rawMessage []byte) (*ComplaintInfo, error) {
+	msg, err := mail.ReadMessage(bytes.NewReader(rawMessage))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse email message: %w", err)
+	}
+
+	contentType := msg.Header.Get("Content-Type")
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return parseHeuristicComplaint(msg)
+	}
+
+	// Standard RFC 5965: multipart/report with report-type=feedback-report
+	if mediaType == "multipart/report" && strings.EqualFold(params["report-type"], "feedback-report") {
+		return parseARFMultipartReport(msg.Body, params["boundary"])
+	}
+
+	return parseHeuristicComplaint(msg)
+}
+
+func parseARFMultipartReport(body io.Reader, boundary string) (*ComplaintInfo, error) {
+	if boundary == "" {
+		return nil, fmt.Errorf("missing boundary in multipart/report")
+	}
+
+	reader := multipart.NewReader(body, boundary)
+	info := &ComplaintInfo{}
+
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to read MIME part: %w", err)
+		}
+
+		partContentType := part.Header.Get("Content-Type")
+		partMediaType, _, _ := mime.ParseMediaType(partContentType)
+
+		switch partMediaType {
+		case "message/feedback-report":
+			partBody, err := io.ReadAll(part)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read feedback-report part: %w", err)
+			}
+			parseFeedbackReport(partBody, info)
+
+		case "message/rfc822", "text/rfc822-headers":
+			partBody, err := io.ReadAll(part)
+			if err != nil {
+				continue
+			}
+			info.OriginalMessageID = extractMessageID(partBody)
+			if info.OriginalRecipient == "" {
+				info.OriginalRecipient = extractToAddress(partBody)
+			}
+		}
+	}
+
+	if info.FeedbackType == "" {
+		return nil, nil
+	}
+
+	return info, nil
+}
+
+// parseFeedbackReport extracts structured fields from a message/feedback-report body (RFC 5965).
+func parseFeedbackReport(body []byte, info *ComplaintInfo) {
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	var currentKey string
+	var currentVal string
+
+	flushField := func() {
+		switch strings.ToLower(currentKey) {
+		case "feedback-type":
+			info.FeedbackType = strings.TrimSpace(currentVal)
+		case "user-agent":
+			info.UserAgent = strings.TrimSpace(currentVal)
+		case "original-rcpt-to":
+			val := strings.TrimSpace(currentVal)
+			if idx := strings.Index(val, ";"); idx >= 0 {
+				info.OriginalRecipient = strings.TrimSpace(val[idx+1:])
+			} else {
+				match := emailRegex.FindString(val)
+				if match != "" {
+					info.OriginalRecipient = match
+				}
+			}
+		case "arrival-date":
+			info.ArrivalDate = strings.TrimSpace(currentVal)
+		case "source-ip":
+			info.SourceIP = strings.TrimSpace(currentVal)
+		case "reported-domain":
+			info.ReportedDomain = strings.TrimSpace(currentVal)
+		}
+		currentKey = ""
+		currentVal = ""
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Continuation line (starts with whitespace)
+		if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
+			if currentKey != "" {
+				currentVal += " " + strings.TrimSpace(line)
+			}
+			continue
+		}
+
+		if currentKey != "" {
+			flushField()
+		}
+
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		if idx := strings.Index(line, ":"); idx >= 0 {
+			currentKey = strings.TrimSpace(line[:idx])
+			currentVal = strings.TrimSpace(line[idx+1:])
+		}
+	}
+
+	if currentKey != "" {
+		flushField()
+	}
+}
+
+func extractToAddress(body []byte) string {
+	msg, err := mail.ReadMessage(bytes.NewReader(body))
+	if err != nil {
+		scanner := bufio.NewScanner(bytes.NewReader(body))
+		for scanner.Scan() {
+			line := scanner.Text()
+			lower := strings.ToLower(line)
+			if strings.HasPrefix(lower, "to:") {
+				val := strings.TrimSpace(line[len("to:"):])
+				match := emailRegex.FindString(val)
+				if match != "" {
+					return match
+				}
+			}
+		}
+		return ""
+	}
+	to := msg.Header.Get("To")
+	match := emailRegex.FindString(to)
+	return match
+}
+
+var complaintSubjectPatterns = []string{
+	"spam complaint",
+	"abuse report",
+	"complaint about message",
+	"feedback report",
+	"spam notification",
+	"complaint notification",
+	"junk mail",
+	"fbl notification",
+	"complaint from",
+}
+
+func parseHeuristicComplaint(msg *mail.Message) (*ComplaintInfo, error) {
+	subject := strings.ToLower(msg.Header.Get("Subject"))
+
+	isComplaint := false
+	for _, pattern := range complaintSubjectPatterns {
+		if strings.Contains(subject, pattern) {
+			isComplaint = true
+			break
+		}
+	}
+
+	if !isComplaint {
+		if msg.Header.Get("X-Complaints-To") != "" {
+			isComplaint = true
+		}
+	}
+
+	if !isComplaint {
+		return nil, nil
+	}
+
+	bodyBytes, err := io.ReadAll(msg.Body)
+	if err != nil {
+		return nil, nil
+	}
+	bodyStr := string(bodyBytes)
+
+	recipient := ""
+	matches := emailRegex.FindAllString(bodyStr, 10)
+	for _, m := range matches {
+		lower := strings.ToLower(m)
+		if !strings.HasPrefix(lower, "postmaster@") &&
+			!strings.HasPrefix(lower, "mailer-daemon@") &&
+			!strings.HasPrefix(lower, "abuse@") {
+			recipient = m
+			break
+		}
+	}
+
+	if recipient == "" {
+		return nil, nil
+	}
+
+	info := &ComplaintInfo{
+		FeedbackType:      "abuse",
+		OriginalRecipient: recipient,
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(bodyStr))
+	for scanner.Scan() {
+		line := scanner.Text()
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "message-id:") {
+			val := strings.TrimSpace(line[len("message-id:"):])
+			info.OriginalMessageID = strings.Trim(val, "<>")
+			break
+		}
+	}
+
+	return info, nil
 }

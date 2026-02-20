@@ -180,12 +180,14 @@ func (p *SMTPBouncePoller) pollIntegration(ctx context.Context, workspaceID stri
 
 	var processedUIDs []imap.UID
 	var bouncesFound int
+	var complaintsFound int
 
 	for _, msg := range messages {
 		if ctx.Err() != nil {
 			break
 		}
 
+		// Try bounce detection first (RFC 3464 DSN)
 		bounceInfo, err := bounceparser.ParseDSN(msg.RawBody)
 		if err != nil {
 			logFields.WithField("uid", msg.UID).
@@ -195,41 +197,79 @@ func (p *SMTPBouncePoller) pollIntegration(ctx context.Context, workspaceID stri
 			continue
 		}
 
-		if bounceInfo == nil {
-			// Not a bounce message, still mark as seen
+		if bounceInfo != nil {
+			bounceCategory := "Temporary"
+			if bounceInfo.IsHardBounce {
+				bounceCategory = "Permanent"
+			}
+
+			payload := domain.SMTPWebhookPayload{
+				Event:          "bounce",
+				Timestamp:      time.Now().UTC().Format(time.RFC3339),
+				MessageID:      bounceInfo.OriginalMessageID,
+				Recipient:      bounceInfo.OriginalRecipient,
+				BounceCategory: bounceCategory,
+				DiagnosticCode: bounceInfo.DiagnosticCode,
+			}
+
+			payloadJSON, err := json.Marshal(payload)
+			if err != nil {
+				logFields.WithField("error", err.Error()).Error("Failed to marshal bounce payload")
+				processedUIDs = append(processedUIDs, msg.UID)
+				continue
+			}
+
+			if err := p.webhookService.ProcessWebhook(ctx, workspaceID, integration.ID, payloadJSON); err != nil {
+				logFields.WithField("error", err.Error()).
+					WithField("recipient", bounceInfo.OriginalRecipient).
+					Warn("Failed to process bounce event")
+			} else {
+				bouncesFound++
+			}
+
 			processedUIDs = append(processedUIDs, msg.UID)
 			continue
 		}
 
-		// Construct SMTPWebhookPayload and inject into pipeline
-		bounceCategory := "Temporary"
-		if bounceInfo.IsHardBounce {
-			bounceCategory = "Permanent"
-		}
-
-		payload := domain.SMTPWebhookPayload{
-			Event:          "bounce",
-			Timestamp:      time.Now().UTC().Format(time.RFC3339),
-			MessageID:      bounceInfo.OriginalMessageID,
-			Recipient:      bounceInfo.OriginalRecipient,
-			BounceCategory: bounceCategory,
-			DiagnosticCode: bounceInfo.DiagnosticCode,
-		}
-
-		payloadJSON, err := json.Marshal(payload)
+		// Not a bounce — try complaint/ARF detection (RFC 5965)
+		complaintInfo, err := bounceparser.ParseARF(msg.RawBody)
 		if err != nil {
-			logFields.WithField("error", err.Error()).Error("Failed to marshal bounce payload")
+			logFields.WithField("uid", msg.UID).
+				WithField("error", err.Error()).
+				Warn("Failed to parse complaint message")
+			processedUIDs = append(processedUIDs, msg.UID)
 			continue
 		}
 
-		if err := p.webhookService.ProcessWebhook(ctx, workspaceID, integration.ID, payloadJSON); err != nil {
-			logFields.WithField("error", err.Error()).
-				WithField("recipient", bounceInfo.OriginalRecipient).
-				Warn("Failed to process bounce event")
-		} else {
-			bouncesFound++
+		if complaintInfo != nil {
+			payload := domain.SMTPWebhookPayload{
+				Event:         "complaint",
+				Timestamp:     time.Now().UTC().Format(time.RFC3339),
+				MessageID:     complaintInfo.OriginalMessageID,
+				Recipient:     complaintInfo.OriginalRecipient,
+				ComplaintType: complaintInfo.FeedbackType,
+			}
+
+			payloadJSON, err := json.Marshal(payload)
+			if err != nil {
+				logFields.WithField("error", err.Error()).Error("Failed to marshal complaint payload")
+				processedUIDs = append(processedUIDs, msg.UID)
+				continue
+			}
+
+			if err := p.webhookService.ProcessWebhook(ctx, workspaceID, integration.ID, payloadJSON); err != nil {
+				logFields.WithField("error", err.Error()).
+					WithField("recipient", complaintInfo.OriginalRecipient).
+					Warn("Failed to process complaint event")
+			} else {
+				complaintsFound++
+			}
+
+			processedUIDs = append(processedUIDs, msg.UID)
+			continue
 		}
 
+		// Neither bounce nor complaint
 		processedUIDs = append(processedUIDs, msg.UID)
 	}
 
@@ -240,7 +280,9 @@ func (p *SMTPBouncePoller) pollIntegration(ctx context.Context, workspaceID stri
 		}
 	}
 
-	if bouncesFound > 0 {
-		logFields.WithField("bounces_processed", bouncesFound).Info("Bounce processing complete")
+	if bouncesFound > 0 || complaintsFound > 0 {
+		logFields.WithField("bounces_processed", bouncesFound).
+			WithField("complaints_processed", complaintsFound).
+			Info("Mailbox processing complete")
 	}
 }
