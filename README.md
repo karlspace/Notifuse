@@ -4,6 +4,23 @@
 [![Go](https://github.com/Notifuse/notifuse/actions/workflows/go.yml/badge.svg)](https://github.com/Notifuse/notifuse/actions/workflows/go.yml)
 [![codecov](https://codecov.io/gh/Notifuse/notifuse/graph/badge.svg?token=VZ0HBEM9OZ)](https://codecov.io/gh/Notifuse/notifuse)
 
+---
+
+## New: SMTP Bounce & Spam Complaint Processing
+
+This version introduces **automatic bounce and spam complaint detection** for SMTP integrations via IMAP mailbox polling — bringing self-hosted SMTP setups to feature parity with managed providers like SES, Mailgun, or Postmark.
+
+### What's included
+
+- **IMAP Bounce Mailbox Polling** — Connects to a configured IMAP mailbox and continuously monitors for new messages. Configurable per integration with custom poll intervals, folders, and TLS settings.
+- **RFC 3464 DSN Parsing** — Parses standard Delivery Status Notifications to detect hard bounces (5.x.x) and soft bounces (4.x.x), extracting recipient, status code, and diagnostic information.
+- **RFC 5965 ARF Spam Complaint Detection** — Parses Abuse Reporting Format messages (feedback loops from ISPs like AOL, Yahoo, Comcast) to detect spam complaints, extracting feedback type, source IP, and reported domain.
+- **Heuristic Fallback** — Non-standard bounce and complaint notifications (missing proper MIME structure) are detected via subject pattern matching and body analysis.
+- **Full Pipeline Integration** — Detected events feed directly into the existing webhook pipeline: bounces update contact status to `bounced`, complaints update contact status to `complained`, with full message history tracking.
+- **Console UI** — Bounce mailbox settings (IMAP host, port, TLS, credentials, folder, poll interval) are configurable per SMTP integration in the workspace settings.
+
+---
+
 **[🎯 Try the Live Demo](https://demo.notifuse.com/console/signin?email=demo@notifuse.com)**
 
 **The open-source alternative to Mailchimp, Brevo, Mailjet, Listmonk, Mailerlite, and Klaviyo, Loop.so, etc.**
