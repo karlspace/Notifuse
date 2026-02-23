@@ -17,16 +17,18 @@ import (
 
 // mockIMAPClient implements IMAPClient for testing
 type mockIMAPClient struct {
-	connectErr error
-	fetchErr   error
-	markErr    error
-	messages   []IMAPMessage
-	seenUIDs   []imap.UID
-	connected  bool
-	closed     bool
+	connectErr  error
+	fetchErr    error
+	markErr     error
+	messages    []IMAPMessage
+	seenUIDs    []imap.UID
+	connected   bool
+	closed      bool
+	lastConfig  IMAPAuthConfig
 }
 
-func (m *mockIMAPClient) Connect(host string, port int, useTLS bool, username, password string) error {
+func (m *mockIMAPClient) Connect(config IMAPAuthConfig) error {
+	m.lastConfig = config
 	if m.connectErr != nil {
 		return m.connectErr
 	}

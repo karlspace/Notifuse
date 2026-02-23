@@ -1708,12 +1708,21 @@ export function Integrations({ workspace, onSave, loading, isOwner }: Integratio
               items={[
                 {
                   key: 'bounce',
-                  label: t`Bounce Mailbox (Optional)`,
+                  label: t`Bounce Processing (Optional)`,
                   children: (
                     <>
                       <p style={{ marginBottom: 16, color: '#888' }}>
-                        {t`Configure an IMAP mailbox to automatically detect bounced emails. The system will poll this mailbox periodically and process bounce notifications.`}
+                        {t`Configure bounce handling for your SMTP integration. Set a bounce address to receive bounces at a dedicated mailbox, and configure IMAP polling to automatically detect and process bounce notifications.`}
                       </p>
+
+                      <Form.Item
+                        name={['smtp', 'bounce_address']}
+                        label={t`Bounce Address (Return-Path)`}
+                        tooltip={t`If set, outgoing emails will use this as the envelope sender (MAIL FROM / Return-Path). Bounces will be delivered to this address instead of the sender address.`}
+                      >
+                        <Input placeholder="bounce@yourdomain.com" disabled={!isOwner} />
+                      </Form.Item>
+
                       <Row gutter={16}>
                         <Col span={10}>
                           <Form.Item
@@ -1763,38 +1772,208 @@ export function Integrations({ workspace, onSave, loading, isOwner }: Integratio
                           </Form.Item>
                         </Col>
                       </Row>
-                      <Row gutter={16}>
-                        <Col span={8}>
-                          <Form.Item
-                            name={['smtp', 'bounce_mailbox_username']}
-                            label={t`Username`}
-                          >
-                            <Input
-                              placeholder={t`Mailbox username`}
-                              disabled={!isOwner}
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col span={8}>
-                          <Form.Item
-                            name={['smtp', 'bounce_mailbox_password']}
-                            label={t`Password`}
-                          >
-                            <Input.Password
-                              placeholder={t`Mailbox password`}
-                              disabled={!isOwner}
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col span={8}>
-                          <Form.Item
-                            name={['smtp', 'bounce_mailbox_folder']}
-                            label={t`Folder`}
-                          >
-                            <Input placeholder="INBOX" disabled={!isOwner} />
-                          </Form.Item>
-                        </Col>
-                      </Row>
+
+                      <Form.Item
+                        name={['smtp', 'bounce_mailbox_auth_type']}
+                        label={t`IMAP Authentication Type`}
+                        initialValue="basic"
+                      >
+                        <Select disabled={!isOwner}>
+                          <Select.Option value="basic">
+                            {t`Basic Authentication (Username/Password)`}
+                          </Select.Option>
+                          <Select.Option value="oauth2">{t`OAuth2 (Microsoft 365 / Google)`}</Select.Option>
+                        </Select>
+                      </Form.Item>
+
+                      <Form.Item
+                        noStyle
+                        shouldUpdate={(prev, curr) => prev?.smtp?.bounce_mailbox_auth_type !== curr?.smtp?.bounce_mailbox_auth_type}
+                      >
+                        {({ getFieldValue }) => {
+                          const bounceAuthType = getFieldValue(['smtp', 'bounce_mailbox_auth_type']) || 'basic'
+
+                          if (bounceAuthType === 'oauth2') {
+                            return (
+                              <>
+                                <Form.Item
+                                  name={['smtp', 'bounce_mailbox_oauth2_provider']}
+                                  label={t`IMAP OAuth2 Provider`}
+                                  rules={[{ required: true, message: t`Please select an OAuth2 provider` }]}
+                                >
+                                  <Select placeholder={t`Select OAuth2 Provider`} disabled={!isOwner}>
+                                    <Select.Option value="microsoft">
+                                      {t`Microsoft 365 / Office 365`}
+                                    </Select.Option>
+                                    <Select.Option value="google">{t`Google Workspace / Gmail`}</Select.Option>
+                                  </Select>
+                                </Form.Item>
+
+                                <Form.Item
+                                  name={['smtp', 'bounce_mailbox_username']}
+                                  label={t`Mailbox Email Address`}
+                                  rules={[
+                                    { required: true, message: t`Email address is required for OAuth2` }
+                                  ]}
+                                  tooltip={t`The email address of the bounce mailbox used for IMAP XOAUTH2 authentication`}
+                                >
+                                  <Input placeholder="bounce@yourdomain.com" disabled={!isOwner} />
+                                </Form.Item>
+
+                                <Form.Item
+                                  noStyle
+                                  shouldUpdate={(prev, curr) =>
+                                    prev?.smtp?.bounce_mailbox_oauth2_provider !== curr?.smtp?.bounce_mailbox_oauth2_provider
+                                  }
+                                >
+                                  {({ getFieldValue: getInnerValue }) => {
+                                    const provider = getInnerValue(['smtp', 'bounce_mailbox_oauth2_provider'])
+
+                                    if (provider === 'microsoft') {
+                                      return (
+                                        <>
+                                          <Form.Item
+                                            name={['smtp', 'bounce_mailbox_oauth2_tenant_id']}
+                                            label="Azure AD Tenant ID"
+                                            rules={[
+                                              {
+                                                required: true,
+                                                message: 'Tenant ID is required for Microsoft'
+                                              }
+                                            ]}
+                                            tooltip={t`Find this in Azure Portal > Azure Active Directory > Overview`}
+                                          >
+                                            <Input
+                                              placeholder="00000000-0000-0000-0000-000000000000"
+                                              disabled={!isOwner}
+                                            />
+                                          </Form.Item>
+                                          <Form.Item
+                                            name={['smtp', 'bounce_mailbox_oauth2_client_id']}
+                                            label="Application (Client) ID"
+                                            rules={[{ required: true, message: 'Client ID is required' }]}
+                                            tooltip={t`Find this in Azure Portal > App registrations > Your App > Overview`}
+                                          >
+                                            <Input
+                                              placeholder="Application (Client) ID"
+                                              disabled={!isOwner}
+                                            />
+                                          </Form.Item>
+                                          <Form.Item
+                                            name={['smtp', 'bounce_mailbox_oauth2_client_secret']}
+                                            label="Client Secret"
+                                            rules={[{ required: true, message: 'Client Secret is required' }]}
+                                            tooltip={t`Create this in Azure Portal > App registrations > Your App > Certificates & secrets`}
+                                          >
+                                            <Input.Password
+                                              placeholder="Client Secret Value"
+                                              disabled={!isOwner}
+                                            />
+                                          </Form.Item>
+                                        </>
+                                      )
+                                    }
+
+                                    if (provider === 'google') {
+                                      return (
+                                        <>
+                                          <Form.Item
+                                            name={['smtp', 'bounce_mailbox_oauth2_client_id']}
+                                            label="Client ID"
+                                            rules={[{ required: true, message: 'Client ID is required' }]}
+                                            tooltip={t`Find this in Google Cloud Console > APIs & Services > Credentials`}
+                                          >
+                                            <Input placeholder="Client ID" disabled={!isOwner} />
+                                          </Form.Item>
+                                          <Form.Item
+                                            name={['smtp', 'bounce_mailbox_oauth2_client_secret']}
+                                            label="Client Secret"
+                                            rules={[{ required: true, message: 'Client Secret is required' }]}
+                                            tooltip={t`Find this in Google Cloud Console > APIs & Services > Credentials`}
+                                          >
+                                            <Input.Password placeholder="Client Secret" disabled={!isOwner} />
+                                          </Form.Item>
+                                          <Form.Item
+                                            name={['smtp', 'bounce_mailbox_oauth2_refresh_token']}
+                                            label="Refresh Token"
+                                            rules={[
+                                              {
+                                                required: true,
+                                                message: 'Refresh Token is required for Google'
+                                              }
+                                            ]}
+                                            tooltip={t`Obtain this using the OAuth2 playground or your own OAuth flow`}
+                                          >
+                                            <Input.Password placeholder="Refresh Token" disabled={!isOwner} />
+                                          </Form.Item>
+                                        </>
+                                      )
+                                    }
+
+                                    return null
+                                  }}
+                                </Form.Item>
+                              </>
+                            )
+                          }
+
+                          // Basic authentication fields
+                          return (
+                            <Row gutter={16}>
+                              <Col span={8}>
+                                <Form.Item
+                                  name={['smtp', 'bounce_mailbox_username']}
+                                  label={t`Username`}
+                                >
+                                  <Input
+                                    placeholder={t`Mailbox username`}
+                                    disabled={!isOwner}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col span={8}>
+                                <Form.Item
+                                  name={['smtp', 'bounce_mailbox_password']}
+                                  label={t`Password`}
+                                >
+                                  <Input.Password
+                                    placeholder={t`Mailbox password`}
+                                    disabled={!isOwner}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col span={8}>
+                                <Form.Item
+                                  name={['smtp', 'bounce_mailbox_folder']}
+                                  label={t`Folder`}
+                                >
+                                  <Input placeholder="INBOX" disabled={!isOwner} />
+                                </Form.Item>
+                              </Col>
+                            </Row>
+                          )
+                        }}
+                      </Form.Item>
+
+                      <Form.Item
+                        noStyle
+                        shouldUpdate={(prev, curr) => prev?.smtp?.bounce_mailbox_auth_type !== curr?.smtp?.bounce_mailbox_auth_type}
+                      >
+                        {({ getFieldValue }) => {
+                          const bounceAuthType = getFieldValue(['smtp', 'bounce_mailbox_auth_type']) || 'basic'
+                          if (bounceAuthType === 'oauth2') {
+                            return (
+                              <Form.Item
+                                name={['smtp', 'bounce_mailbox_folder']}
+                                label={t`Folder`}
+                              >
+                                <Input placeholder="INBOX" disabled={!isOwner} />
+                              </Form.Item>
+                            )
+                          }
+                          return null
+                        }}
+                      </Form.Item>
                     </>
                   )
                 }
@@ -2036,11 +2215,21 @@ export function Integrations({ workspace, onSave, loading, isOwner }: Integratio
           )}
         </Descriptions.Item>
       )
+      if (provider.smtp.bounce_address) {
+        items.push(
+          <Descriptions.Item key="bounce_address" label={t`Bounce Address`}>
+            {provider.smtp.bounce_address}
+          </Descriptions.Item>
+        )
+      }
       if (provider.smtp.bounce_mailbox_host) {
         items.push(
           <Descriptions.Item key="bounce" label={t`Bounce Mailbox`}>
             {provider.smtp.bounce_mailbox_host}:{provider.smtp.bounce_mailbox_port || 993}
             {' '}({t`every`} {provider.smtp.bounce_mailbox_poll_interval_mins || 5} {t`min`})
+            {provider.smtp.bounce_mailbox_auth_type === 'oauth2' && (
+              <span> — OAuth2 ({provider.smtp.bounce_mailbox_oauth2_provider === 'microsoft' ? 'Microsoft 365' : 'Google'})</span>
+            )}
           </Descriptions.Item>
         )
       }

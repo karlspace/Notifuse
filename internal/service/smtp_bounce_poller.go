@@ -14,19 +14,26 @@ import (
 	"github.com/Notifuse/notifuse/pkg/logger"
 )
 
+// IMAPOAuth2TokenProvider fetches an OAuth2 access token for IMAP bounce mailbox authentication.
+// This reuses the same OAuth2 token infrastructure as the SMTP service.
+type IMAPOAuth2TokenProvider interface {
+	GetIMAPAccessToken(smtp *domain.SMTPSettings) (string, error)
+}
+
 // SMTPBouncePoller polls IMAP bounce mailboxes for all SMTP integrations
 // and feeds parsed DSN events into InboundWebhookEventService
 type SMTPBouncePoller struct {
-	workspaceRepo  domain.WorkspaceRepository
-	webhookService domain.InboundWebhookEventServiceInterface
-	logger         logger.Logger
-	interval       time.Duration
-	stopChan       chan struct{}
-	stoppedChan    chan struct{}
-	mu             sync.Mutex
-	running        bool
-	lastPollTimes  map[string]time.Time
-	newIMAPClient  func() IMAPClient
+	workspaceRepo      domain.WorkspaceRepository
+	webhookService     domain.InboundWebhookEventServiceInterface
+	oauth2Provider     IMAPOAuth2TokenProvider
+	logger             logger.Logger
+	interval           time.Duration
+	stopChan           chan struct{}
+	stoppedChan        chan struct{}
+	mu                 sync.Mutex
+	running            bool
+	lastPollTimes      map[string]time.Time
+	newIMAPClient      func() IMAPClient
 }
 
 // NewSMTPBouncePoller creates a new SMTP bounce poller
@@ -46,6 +53,11 @@ func NewSMTPBouncePoller(
 		lastPollTimes:  make(map[string]time.Time),
 		newIMAPClient:  NewIMAPClient,
 	}
+}
+
+// SetOAuth2Provider sets the OAuth2 token provider for IMAP bounce mailbox authentication
+func (p *SMTPBouncePoller) SetOAuth2Provider(provider IMAPOAuth2TokenProvider) {
+	p.oauth2Provider = provider
 }
 
 // Start begins the polling loop. Blocks until Stop is called or ctx is cancelled.
@@ -147,14 +159,27 @@ func (p *SMTPBouncePoller) pollIntegration(ctx context.Context, workspaceID stri
 		WithField("integration_id", integration.ID).
 		WithField("imap_host", smtp.BounceMailboxHost)
 
+	// Build IMAP auth config
+	authConfig := IMAPAuthConfig{
+		Host:     smtp.BounceMailboxHost,
+		Port:     smtp.BounceMailboxPort,
+		UseTLS:   smtp.BounceMailboxTLS,
+		AuthType: smtp.BounceMailboxAuthType,
+		Username: smtp.BounceMailboxUsername,
+		Password: smtp.BounceMailboxPassword,
+	}
+
+	if authConfig.AuthType == "oauth2" && p.oauth2Provider != nil {
+		accessToken, tokenErr := p.oauth2Provider.GetIMAPAccessToken(smtp)
+		if tokenErr != nil {
+			logFields.WithField("error", tokenErr.Error()).Error("Failed to get OAuth2 access token for bounce mailbox")
+			return
+		}
+		authConfig.AccessToken = accessToken
+	}
+
 	client := p.newIMAPClient()
-	err := client.Connect(
-		smtp.BounceMailboxHost,
-		smtp.BounceMailboxPort,
-		smtp.BounceMailboxTLS,
-		smtp.BounceMailboxUsername,
-		smtp.BounceMailboxPassword,
-	)
+	err := client.Connect(authConfig)
 	if err != nil {
 		logFields.WithField("error", err.Error()).Error("Failed to connect to bounce mailbox")
 		return

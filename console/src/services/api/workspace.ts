@@ -114,6 +114,9 @@ export interface SMTPSettings {
   oauth2_refresh_token?: string // Google only
   encrypted_oauth2_refresh_token?: string // Google only
 
+  // Optional: bounce address (Return-Path / envelope sender)
+  bounce_address?: string
+
   // Optional: IMAP bounce mailbox polling
   bounce_mailbox_host?: string
   bounce_mailbox_port?: number
@@ -124,6 +127,18 @@ export interface SMTPSettings {
   encrypted_bounce_mailbox_password?: string
   bounce_mailbox_folder?: string
   bounce_mailbox_poll_interval_mins?: number
+
+  // IMAP bounce mailbox authentication type
+  bounce_mailbox_auth_type?: SMTPAuthType
+
+  // IMAP bounce mailbox OAuth2 fields
+  bounce_mailbox_oauth2_provider?: SMTPOAuth2Provider
+  bounce_mailbox_oauth2_tenant_id?: string // Microsoft only
+  bounce_mailbox_oauth2_client_id?: string
+  bounce_mailbox_oauth2_client_secret?: string
+  encrypted_bounce_mailbox_oauth2_client_secret?: string
+  bounce_mailbox_oauth2_refresh_token?: string // Google only
+  encrypted_bounce_mailbox_oauth2_refresh_token?: string
 }
 
 export interface SparkPostSettings {

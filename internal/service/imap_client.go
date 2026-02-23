@@ -8,7 +8,28 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	"github.com/emersion/go-sasl"
 )
+
+// xoauth2Client implements sasl.Client for the XOAUTH2 mechanism.
+// XOAUTH2 format: "user=" + user + "\x01auth=Bearer " + token + "\x01\x01"
+type xoauth2Client struct {
+	username    string
+	accessToken string
+}
+
+func (c *xoauth2Client) Start() (string, []byte, error) {
+	ir := fmt.Sprintf("user=%s\x01auth=Bearer %s\x01\x01", c.username, c.accessToken)
+	return "XOAUTH2", []byte(ir), nil
+}
+
+func (c *xoauth2Client) Next(challenge []byte) ([]byte, error) {
+	// XOAUTH2 error challenges are base64-encoded JSON; respond with empty to terminate
+	return nil, fmt.Errorf("XOAUTH2 challenge: %s", string(challenge))
+}
+
+// Ensure xoauth2Client implements sasl.Client at compile time
+var _ sasl.Client = (*xoauth2Client)(nil)
 
 // IMAPMessage represents a fetched email message
 type IMAPMessage struct {
@@ -16,9 +37,24 @@ type IMAPMessage struct {
 	RawBody []byte
 }
 
+// IMAPAuthConfig holds authentication configuration for IMAP connections
+type IMAPAuthConfig struct {
+	Host     string
+	Port     int
+	UseTLS   bool
+	AuthType string // "basic" or "oauth2"
+
+	// Basic auth
+	Username string
+	Password string
+
+	// OAuth2
+	AccessToken string // Pre-fetched OAuth2 access token for XOAUTH2
+}
+
 // IMAPClient abstracts IMAP operations for testing
 type IMAPClient interface {
-	Connect(host string, port int, useTLS bool, username, password string) error
+	Connect(config IMAPAuthConfig) error
 	FetchUnseenMessages(folder string) ([]IMAPMessage, error)
 	MarkAsSeen(uids []imap.UID) error
 	Close() error
@@ -33,15 +69,15 @@ type realIMAPClient struct {
 	client *imapclient.Client
 }
 
-func (c *realIMAPClient) Connect(host string, port int, useTLS bool, username, password string) error {
-	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+func (c *realIMAPClient) Connect(config IMAPAuthConfig) error {
+	addr := net.JoinHostPort(config.Host, fmt.Sprintf("%d", config.Port))
 
 	var client *imapclient.Client
 	var err error
 
-	if useTLS {
+	if config.UseTLS {
 		client, err = imapclient.DialTLS(addr, &imapclient.Options{
-			TLSConfig: &tls.Config{ServerName: host},
+			TLSConfig: &tls.Config{ServerName: config.Host},
 		})
 	} else {
 		client, err = imapclient.DialInsecure(addr, nil)
@@ -50,9 +86,19 @@ func (c *realIMAPClient) Connect(host string, port int, useTLS bool, username, p
 		return fmt.Errorf("failed to connect to IMAP server %s: %w", addr, err)
 	}
 
-	if err := client.Login(username, password).Wait(); err != nil {
-		client.Close()
-		return fmt.Errorf("IMAP login failed: %w", err)
+	if config.AuthType == "oauth2" {
+		// XOAUTH2 authentication
+		saslClient := &xoauth2Client{username: config.Username, accessToken: config.AccessToken}
+		if err := client.Authenticate(saslClient); err != nil {
+			client.Close()
+			return fmt.Errorf("IMAP XOAUTH2 authentication failed: %w", err)
+		}
+	} else {
+		// Basic authentication (default)
+		if err := client.Login(config.Username, config.Password).Wait(); err != nil {
+			client.Close()
+			return fmt.Errorf("IMAP login failed: %w", err)
+		}
 	}
 
 	c.client = client

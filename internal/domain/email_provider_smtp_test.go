@@ -667,7 +667,7 @@ func TestSMTPSettings_EncryptDecryptBounceMailboxPassword(t *testing.T) {
 func TestSMTPSettings_ValidateBounceMailbox(t *testing.T) {
 	passphrase := "test-passphrase"
 
-	t.Run("valid config", func(t *testing.T) {
+	t.Run("valid basic auth config", func(t *testing.T) {
 		s := &domain.SMTPSettings{
 			BounceMailboxHost:     "imap.example.com",
 			BounceMailboxPort:     993,
@@ -682,7 +682,7 @@ func TestSMTPSettings_ValidateBounceMailbox(t *testing.T) {
 		assert.NotEmpty(t, s.EncryptedBounceMailboxPassword)
 	})
 
-	t.Run("missing username", func(t *testing.T) {
+	t.Run("missing username basic auth", func(t *testing.T) {
 		s := &domain.SMTPSettings{
 			BounceMailboxHost:     "imap.example.com",
 			BounceMailboxPassword: "secret",
@@ -692,7 +692,7 @@ func TestSMTPSettings_ValidateBounceMailbox(t *testing.T) {
 		assert.Contains(t, err.Error(), "username is required")
 	})
 
-	t.Run("missing password", func(t *testing.T) {
+	t.Run("missing password basic auth", func(t *testing.T) {
 		s := &domain.SMTPSettings{
 			BounceMailboxHost:     "imap.example.com",
 			BounceMailboxUsername: "user",
@@ -729,12 +729,193 @@ func TestSMTPSettings_ValidateBounceMailbox(t *testing.T) {
 		assert.Equal(t, "Bounces", s.BounceMailboxFolder)
 		assert.Equal(t, 10, s.BounceMailboxPollIntervalMins)
 	})
+
+	// OAuth2 bounce mailbox tests
+	t.Run("valid OAuth2 Microsoft config", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:                "outlook.office365.com",
+			BounceMailboxPort:                993,
+			BounceMailboxAuthType:            "oauth2",
+			BounceMailboxUsername:            "bounce@company.com",
+			BounceMailboxOAuth2Provider:      "microsoft",
+			BounceMailboxOAuth2TenantID:      "tenant-123",
+			BounceMailboxOAuth2ClientID:      "client-123",
+			BounceMailboxOAuth2ClientSecret:  "secret-123",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		require.NoError(t, err)
+		assert.NotEmpty(t, s.EncryptedBounceMailboxUsername)
+		assert.NotEmpty(t, s.EncryptedBounceMailboxOAuth2ClientSecret)
+	})
+
+	t.Run("valid OAuth2 Google config", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:                "imap.gmail.com",
+			BounceMailboxPort:                993,
+			BounceMailboxAuthType:            "oauth2",
+			BounceMailboxUsername:            "bounce@company.com",
+			BounceMailboxOAuth2Provider:      "google",
+			BounceMailboxOAuth2ClientID:      "client-123",
+			BounceMailboxOAuth2ClientSecret:  "secret-123",
+			BounceMailboxOAuth2RefreshToken:  "refresh-123",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		require.NoError(t, err)
+		assert.NotEmpty(t, s.EncryptedBounceMailboxUsername)
+		assert.NotEmpty(t, s.EncryptedBounceMailboxOAuth2ClientSecret)
+		assert.NotEmpty(t, s.EncryptedBounceMailboxOAuth2RefreshToken)
+	})
+
+	t.Run("OAuth2 missing provider", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:                "imap.example.com",
+			BounceMailboxAuthType:            "oauth2",
+			BounceMailboxUsername:            "user@example.com",
+			BounceMailboxOAuth2ClientID:      "client-123",
+			BounceMailboxOAuth2ClientSecret:  "secret-123",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "oauth2_provider is required")
+	})
+
+	t.Run("OAuth2 invalid provider", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:                "imap.example.com",
+			BounceMailboxAuthType:            "oauth2",
+			BounceMailboxUsername:            "user@example.com",
+			BounceMailboxOAuth2Provider:      "invalid",
+			BounceMailboxOAuth2ClientID:      "client-123",
+			BounceMailboxOAuth2ClientSecret:  "secret-123",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "must be 'microsoft' or 'google'")
+	})
+
+	t.Run("OAuth2 missing client ID", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:                "imap.example.com",
+			BounceMailboxAuthType:            "oauth2",
+			BounceMailboxUsername:            "user@example.com",
+			BounceMailboxOAuth2Provider:      "microsoft",
+			BounceMailboxOAuth2TenantID:      "tenant-123",
+			BounceMailboxOAuth2ClientSecret:  "secret-123",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "oauth2_client_id is required")
+	})
+
+	t.Run("OAuth2 missing client secret", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:                "imap.example.com",
+			BounceMailboxAuthType:            "oauth2",
+			BounceMailboxUsername:            "user@example.com",
+			BounceMailboxOAuth2Provider:      "microsoft",
+			BounceMailboxOAuth2TenantID:      "tenant-123",
+			BounceMailboxOAuth2ClientID:      "client-123",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "oauth2_client_secret is required")
+	})
+
+	t.Run("OAuth2 missing username", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:                "imap.example.com",
+			BounceMailboxAuthType:            "oauth2",
+			BounceMailboxOAuth2Provider:      "microsoft",
+			BounceMailboxOAuth2TenantID:      "tenant-123",
+			BounceMailboxOAuth2ClientID:      "client-123",
+			BounceMailboxOAuth2ClientSecret:  "secret-123",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "username (email) is required")
+	})
+
+	t.Run("OAuth2 Microsoft missing tenant ID", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:                "imap.example.com",
+			BounceMailboxAuthType:            "oauth2",
+			BounceMailboxUsername:            "user@example.com",
+			BounceMailboxOAuth2Provider:      "microsoft",
+			BounceMailboxOAuth2ClientID:      "client-123",
+			BounceMailboxOAuth2ClientSecret:  "secret-123",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "oauth2_tenant_id is required for Microsoft")
+	})
+
+	t.Run("OAuth2 Google missing refresh token", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			BounceMailboxHost:                "imap.example.com",
+			BounceMailboxAuthType:            "oauth2",
+			BounceMailboxUsername:            "user@example.com",
+			BounceMailboxOAuth2Provider:      "google",
+			BounceMailboxOAuth2ClientID:      "client-123",
+			BounceMailboxOAuth2ClientSecret:  "secret-123",
+		}
+		err := s.ValidateBounceMailbox(passphrase)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "oauth2_refresh_token is required for Google")
+	})
+}
+
+func TestSMTPSettings_EncryptDecryptBounceMailboxOAuth2ClientSecret(t *testing.T) {
+	passphrase := "test-passphrase"
+	clientSecret := "bounce-oauth2-secret"
+
+	settings := &domain.SMTPSettings{
+		BounceMailboxOAuth2ClientSecret: clientSecret,
+	}
+
+	err := settings.EncryptBounceMailboxOAuth2ClientSecret(passphrase)
+	require.NoError(t, err)
+	assert.NotEmpty(t, settings.EncryptedBounceMailboxOAuth2ClientSecret)
+
+	settings.BounceMailboxOAuth2ClientSecret = ""
+	err = settings.DecryptBounceMailboxOAuth2ClientSecret(passphrase)
+	require.NoError(t, err)
+	assert.Equal(t, clientSecret, settings.BounceMailboxOAuth2ClientSecret)
+
+	// Wrong passphrase
+	settings.BounceMailboxOAuth2ClientSecret = ""
+	err = settings.DecryptBounceMailboxOAuth2ClientSecret("wrong")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to decrypt bounce mailbox OAuth2 client secret")
+}
+
+func TestSMTPSettings_EncryptDecryptBounceMailboxOAuth2RefreshToken(t *testing.T) {
+	passphrase := "test-passphrase"
+	refreshToken := "bounce-oauth2-refresh-token"
+
+	settings := &domain.SMTPSettings{
+		BounceMailboxOAuth2RefreshToken: refreshToken,
+	}
+
+	err := settings.EncryptBounceMailboxOAuth2RefreshToken(passphrase)
+	require.NoError(t, err)
+	assert.NotEmpty(t, settings.EncryptedBounceMailboxOAuth2RefreshToken)
+
+	settings.BounceMailboxOAuth2RefreshToken = ""
+	err = settings.DecryptBounceMailboxOAuth2RefreshToken(passphrase)
+	require.NoError(t, err)
+	assert.Equal(t, refreshToken, settings.BounceMailboxOAuth2RefreshToken)
+
+	// Wrong passphrase
+	settings.BounceMailboxOAuth2RefreshToken = ""
+	err = settings.DecryptBounceMailboxOAuth2RefreshToken("wrong")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to decrypt bounce mailbox OAuth2 refresh token")
 }
 
 func TestSMTPSettings_Validate_WithBounceMailbox(t *testing.T) {
 	passphrase := "test-passphrase"
 
-	t.Run("valid SMTP with bounce mailbox", func(t *testing.T) {
+	t.Run("valid SMTP with bounce mailbox basic auth", func(t *testing.T) {
 		s := &domain.SMTPSettings{
 			Host:                  "smtp.example.com",
 			Port:                  587,
@@ -745,6 +926,28 @@ func TestSMTPSettings_Validate_WithBounceMailbox(t *testing.T) {
 		err := s.Validate(passphrase)
 		require.NoError(t, err)
 		assert.NotEmpty(t, s.EncryptedBounceMailboxUsername)
+	})
+
+	t.Run("valid SMTP with bounce mailbox OAuth2", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			Host:                             "smtp.office365.com",
+			Port:                             587,
+			AuthType:                         "oauth2",
+			OAuth2Provider:                   "microsoft",
+			OAuth2TenantID:                   "tenant-123",
+			OAuth2ClientID:                   "client-123",
+			OAuth2ClientSecret:               "secret-123",
+			BounceMailboxHost:                "outlook.office365.com",
+			BounceMailboxAuthType:            "oauth2",
+			BounceMailboxUsername:            "bounce@company.com",
+			BounceMailboxOAuth2Provider:      "microsoft",
+			BounceMailboxOAuth2TenantID:      "tenant-123",
+			BounceMailboxOAuth2ClientID:      "client-123",
+			BounceMailboxOAuth2ClientSecret:  "secret-123",
+		}
+		err := s.Validate(passphrase)
+		require.NoError(t, err)
+		assert.NotEmpty(t, s.EncryptedBounceMailboxOAuth2ClientSecret)
 	})
 
 	t.Run("valid SMTP without bounce mailbox", func(t *testing.T) {
@@ -766,5 +969,16 @@ func TestSMTPSettings_Validate_WithBounceMailbox(t *testing.T) {
 		err := s.Validate(passphrase)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "username is required")
+	})
+
+	t.Run("bounce address field preserved", func(t *testing.T) {
+		s := &domain.SMTPSettings{
+			Host:          "smtp.example.com",
+			Port:          587,
+			BounceAddress: "bounce@example.com",
+		}
+		err := s.Validate(passphrase)
+		require.NoError(t, err)
+		assert.Equal(t, "bounce@example.com", s.BounceAddress)
 	})
 }
