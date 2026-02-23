@@ -16,8 +16,8 @@ RUN npm config set fetch-retries 5 && \
 # Copy frontend source code
 COPY console/ ./
 
-# Build frontend in production mode
-RUN npm run build
+# Extract and compile i18n translations, then build frontend
+RUN npx lingui extract --clean && npm run build
 
 # Stage 2: Build the notification center frontend
 FROM node:20-alpine AS notification-center-builder
