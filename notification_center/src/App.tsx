@@ -159,7 +159,7 @@ function App() {
         const contactLang = data.contact?.language || null
         const contactTz = data.contact?.timezone || null
 
-        const langChanged = browserLang.length === 2 && contactLang !== browserLang
+        const langChanged = browserLang.length === 2 && !contactLang
         const tzChanged = !!browserTz && contactTz !== browserTz
 
         if (langChanged || tzChanged) {

@@ -751,6 +751,7 @@ func TestBroadcastOrchestrator_Process(t *testing.T) {
 					gomock.Any(),
 					gomock.Any(),
 					gomock.Any(),
+					gomock.Any(),
 				).Return(2, 0, nil)
 
 				// Mock task state saving
@@ -878,6 +879,7 @@ func TestBroadcastOrchestrator_Process(t *testing.T) {
 					true,
 					"broadcast-123",
 					recipients,
+					gomock.Any(),
 					gomock.Any(),
 					gomock.Any(),
 					gomock.Any(),
@@ -1322,6 +1324,7 @@ func TestBroadcastOrchestrator_Process(t *testing.T) {
 					gomock.Any(),
 					gomock.Any(),
 					gomock.Any(),
+					gomock.Any(),
 				).Return(1, 0, nil)
 
 				// Mock task state saving
@@ -1476,7 +1479,7 @@ func TestBroadcastOrchestrator_Process_ABTestStartSetsTestingAndCompletesTestPha
 	mockContactRepo.EXPECT().GetContactsForBroadcast(gomock.Any(), "workspace-123", bcast.Audience, 1, "").Return(recipients, nil)
 
 	// Send batch
-	mockMessageSender.EXPECT().SendBatch(gomock.Any(), "workspace-123", "marketing-provider-id", "secret-key", gomock.Any(), true, "broadcast-123", recipients, gomock.Any(), gomock.Any(), gomock.Any()).Return(1, 0, nil)
+	mockMessageSender.EXPECT().SendBatch(gomock.Any(), "workspace-123", "marketing-provider-id", "secret-key", gomock.Any(), true, "broadcast-123", recipients, gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(1, 0, nil)
 
 	// Save state
 	mockTaskRepo.EXPECT().SaveState(gomock.Any(), "workspace-123", "task-123", gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
@@ -1789,7 +1792,7 @@ func TestBroadcastOrchestrator_Process_AutoWinnerEvaluationPath(t *testing.T) {
 	mockContactRepo.EXPECT().GetContactsForBroadcast(gomock.Any(), "w", bcast.Audience, 1, "").Return([]*domain.ContactWithList{{Contact: &domain.Contact{Email: "w@x.com"}}}, nil)
 
 	// Send
-	mockMessageSender.EXPECT().SendBatch(gomock.Any(), "w", "pid", "k", gomock.Any(), true, "b", gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(1, 0, nil)
+	mockMessageSender.EXPECT().SendBatch(gomock.Any(), "w", "pid", "k", gomock.Any(), true, "b", gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(1, 0, nil)
 
 	// Save state
 	mockTaskRepo.EXPECT().SaveState(gomock.Any(), "w", "t", gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
@@ -1931,6 +1934,7 @@ func TestBroadcastOrchestrator_Process_ABTestWinnerPhaseProcessesRemainingRecipi
 		gomock.Any(), // templates
 		gomock.Any(), // email provider
 		gomock.Any(), // timeout
+		gomock.Any(), // workspaceDefaultLanguage
 	).Return(1, 0, nil) // 1 sent, 0 failed
 
 	// Mock task state saving
@@ -2394,6 +2398,114 @@ func TestBroadcastOrchestrator_ValidateTemplates_MissingContent(t *testing.T) {
 	assert.Contains(t, err.Error(), "template missing content")
 }
 
+// TestBroadcastOrchestrator_ValidateTemplates_CodeModeValid tests ValidateTemplates with a valid code mode template
+func TestBroadcastOrchestrator_ValidateTemplates_CodeModeValid(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockMessageSender := mocks.NewMockMessageSender(ctrl)
+	mockBroadcastRepo := domainmocks.NewMockBroadcastRepository(ctrl)
+	mockTemplateRepo := domainmocks.NewMockTemplateRepository(ctrl)
+	mockContactRepo := domainmocks.NewMockContactRepository(ctrl)
+	mockTaskRepo := domainmocks.NewMockTaskRepository(ctrl)
+	mockWorkspaceRepo := domainmocks.NewMockWorkspaceRepository(ctrl)
+	mockLogger := pkgmocks.NewMockLogger(ctrl)
+	mockTimeProvider := mocks.NewMockTimeProvider(ctrl)
+	mockEventBus := domainmocks.NewMockEventBus(ctrl)
+
+	config := &broadcast.Config{
+		FetchBatchSize:      100,
+		MaxProcessTime:      30 * time.Second,
+		ProgressLogInterval: 5 * time.Second,
+	}
+
+	orchestrator := broadcast.NewBroadcastOrchestrator(
+		mockMessageSender,
+		mockBroadcastRepo,
+		mockTemplateRepo,
+		mockContactRepo,
+		mockTaskRepo,
+		mockWorkspaceRepo,
+		nil,
+		mockLogger,
+		config,
+		mockTimeProvider,
+		"https://api.example.com",
+		mockEventBus,
+	)
+
+	mjmlSource := "<mjml><mj-body><mj-section><mj-column><mj-text>Hello</mj-text></mj-column></mj-section></mj-body></mjml>"
+	templates := map[string]*domain.Template{
+		"template-1": {
+			ID: "template-1",
+			Email: &domain.EmailTemplate{
+				EditorMode: domain.EditorModeCode,
+				MjmlSource: &mjmlSource,
+				Subject:    "Test Subject",
+				SenderID:   "sender-1",
+			},
+		},
+	}
+	err := orchestrator.ValidateTemplates(templates)
+	require.NoError(t, err)
+}
+
+// TestBroadcastOrchestrator_ValidateTemplates_CodeModeMissingSource tests ValidateTemplates with code mode template missing mjml_source
+func TestBroadcastOrchestrator_ValidateTemplates_CodeModeMissingSource(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockMessageSender := mocks.NewMockMessageSender(ctrl)
+	mockBroadcastRepo := domainmocks.NewMockBroadcastRepository(ctrl)
+	mockTemplateRepo := domainmocks.NewMockTemplateRepository(ctrl)
+	mockContactRepo := domainmocks.NewMockContactRepository(ctrl)
+	mockTaskRepo := domainmocks.NewMockTaskRepository(ctrl)
+	mockWorkspaceRepo := domainmocks.NewMockWorkspaceRepository(ctrl)
+	mockLogger := pkgmocks.NewMockLogger(ctrl)
+	mockTimeProvider := mocks.NewMockTimeProvider(ctrl)
+	mockEventBus := domainmocks.NewMockEventBus(ctrl)
+
+	// Setup logger expectations for error logging
+	mockLogger.EXPECT().WithField("template_id", "template-1").Return(mockLogger)
+	mockLogger.EXPECT().Error("Code mode template missing mjml_source")
+
+	config := &broadcast.Config{
+		FetchBatchSize:      100,
+		MaxProcessTime:      30 * time.Second,
+		ProgressLogInterval: 5 * time.Second,
+	}
+
+	orchestrator := broadcast.NewBroadcastOrchestrator(
+		mockMessageSender,
+		mockBroadcastRepo,
+		mockTemplateRepo,
+		mockContactRepo,
+		mockTaskRepo,
+		mockWorkspaceRepo,
+		nil,
+		mockLogger,
+		config,
+		mockTimeProvider,
+		"https://api.example.com",
+		mockEventBus,
+	)
+
+	templates := map[string]*domain.Template{
+		"template-1": {
+			ID: "template-1",
+			Email: &domain.EmailTemplate{
+				EditorMode: domain.EditorModeCode,
+				MjmlSource: nil, // Missing mjml_source
+				Subject:    "Test Subject",
+				SenderID:   "sender-1",
+			},
+		},
+	}
+	err := orchestrator.ValidateTemplates(templates)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "template missing content")
+}
+
 // TestBroadcastOrchestrator_FetchBatch_BroadcastNotFound tests FetchBatch when broadcast is not found
 func TestBroadcastOrchestrator_FetchBatch_BroadcastNotFound(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -2763,7 +2875,8 @@ func TestBroadcastOrchestrator_Process_PartialBatchCursorUpdate(t *testing.T) {
 		gomock.Any(),
 		gomock.Any(),
 		gomock.Any(),
-	).DoAndReturn(func(_ context.Context, _, _, _, _ interface{}, _ bool, _ string, _ []*domain.ContactWithList, _, _, _ interface{}) (int, int, error) {
+		gomock.Any(),
+	).DoAndReturn(func(_ context.Context, _, _, _, _ interface{}, _ bool, _ string, _ []*domain.ContactWithList, _, _, _, _ interface{}) (int, int, error) {
 		sendBatchCalled = true
 		return 3, 0, nil // Only 3 sent due to internal timeout
 	})
@@ -2777,6 +2890,7 @@ func TestBroadcastOrchestrator_Process_PartialBatchCursorUpdate(t *testing.T) {
 		true,
 		"broadcast-123",
 		recipients2,
+		gomock.Any(),
 		gomock.Any(),
 		gomock.Any(),
 		gomock.Any(),
@@ -2925,7 +3039,7 @@ func TestProcessBroadcastTask_RecipientFeedFailure_PausesBroadcast(t *testing.T)
 	// SendBatch returns ErrBroadcastShouldPause
 	mockMessageSender.EXPECT().SendBatch(
 		gomock.Any(), "workspace-123", "marketing-provider-id", "secret-key", gomock.Any(), true, "broadcast-123",
-		recipients, gomock.Any(), gomock.Any(), gomock.Any(),
+		recipients, gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 	).Return(0, 0, fmt.Errorf("%w: recipient feed failed for user1@test.com: server error", broadcast.ErrBroadcastShouldPause))
 
 	// UpdateBroadcast should set status to paused
@@ -3035,7 +3149,7 @@ func TestProcessBroadcastTask_RecipientFeedFailure_NotMarkedAsFailed(t *testing.
 	// SendBatch returns ErrBroadcastShouldPause
 	mockMessageSender.EXPECT().SendBatch(
 		gomock.Any(), "workspace-123", "marketing-provider-id", "secret-key", gomock.Any(), true, "broadcast-123",
-		recipients, gomock.Any(), gomock.Any(), gomock.Any(),
+		recipients, gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 	).Return(0, 0, fmt.Errorf("%w: recipient feed failed for user1@test.com: server error", broadcast.ErrBroadcastShouldPause))
 
 	// UpdateBroadcast should be called exactly ONCE (for pause), NOT for failed

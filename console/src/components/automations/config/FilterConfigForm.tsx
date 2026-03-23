@@ -23,7 +23,7 @@ const EMPTY_TREE: TreeNode = {
 
 export const FilterConfigForm: React.FC<FilterConfigFormProps> = ({ config, onChange }) => {
   const { t } = useLingui()
-  const { lists } = useAutomation()
+  const { lists, workspace } = useAutomation()
   const initializedRef = useRef(false)
 
   // Initialize with empty tree if conditions is undefined
@@ -65,6 +65,7 @@ export const FilterConfigForm: React.FC<FilterConfigFormProps> = ({ config, onCh
           onChange={handleConditionsChange}
           schemas={TableSchemas}
           lists={lists}
+          workspaceId={workspace.id}
         />
       </Form.Item>
     </Form>

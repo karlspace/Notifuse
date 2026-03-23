@@ -43,6 +43,12 @@ const (
 	ChannelWeb   = "web"
 )
 
+// Editor mode constants for email templates
+const (
+	EditorModeVisual = "visual"
+	EditorModeCode   = "code"
+)
+
 type TemplateCategory string
 
 const (
@@ -65,21 +71,91 @@ func (t TemplateCategory) Validate() error {
 	return fmt.Errorf("invalid template category: %s", t)
 }
 
+// TemplateTranslation holds the translated content for a specific language variant.
+type TemplateTranslation struct {
+	Email *EmailTemplate `json:"email,omitempty"`
+	Web   *WebTemplate   `json:"web,omitempty"`
+}
+
+// validateTranslations validates translation language keys, channel match, and content.
+func validateTranslations(translations map[string]TemplateTranslation, channel string, testData MapOfAny) error {
+	for lang, translation := range translations {
+		if !IsValidLanguage(lang) {
+			return fmt.Errorf("invalid translation language code: %s", lang)
+		}
+		if translation.Email == nil && translation.Web == nil {
+			return fmt.Errorf("translation '%s': must have either email or web content", lang)
+		}
+		switch channel {
+		case ChannelEmail:
+			if translation.Web != nil {
+				return fmt.Errorf("translation '%s': web content not allowed for email channel", lang)
+			}
+			if translation.Email != nil {
+				if err := translation.Email.Validate(testData); err != nil {
+					return fmt.Errorf("translation '%s': %w", lang, err)
+				}
+			}
+		case ChannelWeb:
+			if translation.Email != nil {
+				return fmt.Errorf("translation '%s': email content not allowed for web channel", lang)
+			}
+			if translation.Web != nil {
+				if err := translation.Web.Validate(testData); err != nil {
+					return fmt.Errorf("translation '%s': %w", lang, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 type Template struct {
-	ID              string         `json:"id"`
-	Name            string         `json:"name"`
-	Version         int64          `json:"version"`
-	Channel         string         `json:"channel"` // email or web
-	Email           *EmailTemplate `json:"email,omitempty"`
-	Web             *WebTemplate   `json:"web,omitempty"`
-	Category        string         `json:"category"`
-	TemplateMacroID *string        `json:"template_macro_id,omitempty"`
-	IntegrationID   *string        `json:"integration_id,omitempty"` // Set if template is managed by an integration (e.g., Supabase)
-	TestData        MapOfAny       `json:"test_data,omitempty"`
-	Settings        MapOfAny       `json:"settings,omitempty"` // Channels specific 3rd-party settings
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	DeletedAt       *time.Time     `json:"deleted_at,omitempty"`
+	ID              string                          `json:"id"`
+	Name            string                          `json:"name"`
+	Version         int64                           `json:"version"`
+	Channel         string                          `json:"channel"` // email or web
+	Email           *EmailTemplate                  `json:"email,omitempty"`
+	Web             *WebTemplate                    `json:"web,omitempty"`
+	Category        string                          `json:"category"`
+	TemplateMacroID *string                         `json:"template_macro_id,omitempty"`
+	IntegrationID   *string                         `json:"integration_id,omitempty"` // Set if template is managed by an integration (e.g., Supabase)
+	TestData        MapOfAny                        `json:"test_data,omitempty"`
+	Settings        MapOfAny                        `json:"settings,omitempty"` // Channels specific 3rd-party settings
+	Translations    map[string]TemplateTranslation  `json:"translations,omitempty"`
+	CreatedAt       time.Time                       `json:"created_at"`
+	UpdatedAt       time.Time                       `json:"updated_at"`
+	DeletedAt       *time.Time                      `json:"deleted_at,omitempty"`
+}
+
+// ResolveEmailContent returns the EmailTemplate for the given contact language.
+// Falls back to the default template content if no translation exists.
+func (t *Template) ResolveEmailContent(contactLanguage string, workspaceDefaultLanguage string) *EmailTemplate {
+	if t.Email == nil || t.Translations == nil || contactLanguage == "" {
+		return t.Email
+	}
+	if contactLanguage == workspaceDefaultLanguage {
+		return t.Email
+	}
+	if translation, ok := t.Translations[contactLanguage]; ok && translation.Email != nil {
+		return translation.Email
+	}
+	return t.Email
+}
+
+// ResolveWebContent returns the WebTemplate for the given contact language.
+// Falls back to the default template content if no translation exists.
+func (t *Template) ResolveWebContent(contactLanguage string, workspaceDefaultLanguage string) *WebTemplate {
+	if t.Web == nil || t.Translations == nil || contactLanguage == "" {
+		return t.Web
+	}
+	if contactLanguage == workspaceDefaultLanguage {
+		return t.Web
+	}
+	if translation, ok := t.Translations[contactLanguage]; ok && translation.Web != nil {
+		return translation.Web
+	}
+	return t.Web
 }
 
 func (t *Template) Validate() error {
@@ -148,6 +224,11 @@ func (t *Template) Validate() error {
 		}
 	}
 
+	// Validate translations: language keys, channel match, and content
+	if err := validateTranslations(t.Translations, t.Channel, t.TestData); err != nil {
+		return fmt.Errorf("invalid template: %w", err)
+	}
+
 	return nil
 }
 
@@ -193,16 +274,32 @@ func (t TemplateReference) Value() (driver.Value, error) {
 }
 
 type EmailTemplate struct {
-	SenderID         string                   `json:"sender_id,omitempty"`
-	ReplyTo          string                   `json:"reply_to,omitempty"`
-	Subject          string                   `json:"subject"`
-	SubjectPreview   *string                  `json:"subject_preview,omitempty"`
-	CompiledPreview  string                   `json:"compiled_preview"` // compiled html
+	EditorMode       string                  `json:"editor_mode,omitempty"`
+	MjmlSource       *string                 `json:"mjml_source,omitempty"`
+	SenderID         string                  `json:"sender_id,omitempty"`
+	ReplyTo          string                  `json:"reply_to,omitempty"`
+	Subject          string                  `json:"subject"`
+	SubjectPreview   *string                 `json:"subject_preview,omitempty"`
+	CompiledPreview  string                  `json:"compiled_preview"` // compiled html
 	VisualEditorTree notifuse_mjml.EmailBlock `json:"visual_editor_tree"`
-	Text             *string                  `json:"text,omitempty"`
+	Text             *string                 `json:"text,omitempty"`
+}
+
+// GetCodeModeMjmlSource returns MjmlSource if the template is in code mode, nil otherwise.
+// Safe to call on a nil receiver.
+func (e *EmailTemplate) GetCodeModeMjmlSource() *string {
+	if e != nil && e.EditorMode == EditorModeCode && e.MjmlSource != nil {
+		return e.MjmlSource
+	}
+	return nil
 }
 
 func (e *EmailTemplate) Validate(testData MapOfAny) error {
+	// Validate editor mode if set
+	if e.EditorMode != "" && e.EditorMode != EditorModeVisual && e.EditorMode != EditorModeCode {
+		return fmt.Errorf("invalid email template: editor_mode must be '%s' or '%s'", EditorModeVisual, EditorModeCode)
+	}
+
 	// Validate required fields
 	if e.Subject == "" {
 		return fmt.Errorf("invalid email template: subject is required")
@@ -210,35 +307,50 @@ func (e *EmailTemplate) Validate(testData MapOfAny) error {
 	if len(e.Subject) > 255 {
 		return fmt.Errorf("invalid email template: subject length must be between 1 and 255")
 	}
-	if e.VisualEditorTree.GetType() != notifuse_mjml.MJMLComponentMjml {
-		return fmt.Errorf("invalid email template: visual_editor_tree must have type 'mjml'")
-	}
-	if e.VisualEditorTree.GetChildren() == nil {
-		return fmt.Errorf("invalid email template: visual_editor_tree root block must have children")
-	}
-	if e.CompiledPreview == "" {
-		// Prepare template data JSON string
-		var templateDataStr string
-		if len(testData) > 0 {
-			jsonDataBytes, err := json.Marshal(testData)
-			if err != nil {
-				return fmt.Errorf("failed to marshal test_data: %w", err)
-			}
-			templateDataStr = string(jsonDataBytes)
-		}
 
-		// Compile tree to MJML using our pkg/notifuse_mjml function
-		var mjmlResult string
-		if templateDataStr != "" {
-			result, err := notifuse_mjml.ConvertJSONToMJMLWithData(e.VisualEditorTree, templateDataStr)
-			if err != nil {
-				return fmt.Errorf("failed to convert tree to MJML: %w", err)
-			}
-			mjmlResult = result
-		} else {
-			mjmlResult = notifuse_mjml.ConvertJSONToMJML(e.VisualEditorTree)
+	// Code mode validation: require MjmlSource, skip visual editor tree validation
+	if e.EditorMode == EditorModeCode {
+		if e.MjmlSource == nil || *e.MjmlSource == "" {
+			return fmt.Errorf("invalid email template: mjml_source is required for code mode")
 		}
-		e.CompiledPreview = mjmlResult
+		// Code mode: store raw MJML source as CompiledPreview.
+		// Visual mode stores compiled MJML output; for code mode the raw source
+		// serves as the lightweight preview representation.
+		if e.CompiledPreview == "" {
+			e.CompiledPreview = *e.MjmlSource
+		}
+	} else {
+		// Visual mode validation (default)
+		if e.VisualEditorTree.GetType() != notifuse_mjml.MJMLComponentMjml {
+			return fmt.Errorf("invalid email template: visual_editor_tree must have type 'mjml'")
+		}
+		if e.VisualEditorTree.GetChildren() == nil {
+			return fmt.Errorf("invalid email template: visual_editor_tree root block must have children")
+		}
+		if e.CompiledPreview == "" {
+			// Prepare template data JSON string
+			var templateDataStr string
+			if len(testData) > 0 {
+				jsonDataBytes, err := json.Marshal(testData)
+				if err != nil {
+					return fmt.Errorf("failed to marshal test_data: %w", err)
+				}
+				templateDataStr = string(jsonDataBytes)
+			}
+
+			// Compile tree to MJML using our pkg/notifuse_mjml function
+			var mjmlResult string
+			if templateDataStr != "" {
+				result, err := notifuse_mjml.ConvertJSONToMJMLWithData(e.VisualEditorTree, templateDataStr)
+				if err != nil {
+					return fmt.Errorf("failed to convert tree to MJML: %w", err)
+				}
+				mjmlResult = result
+			} else {
+				mjmlResult = notifuse_mjml.ConvertJSONToMJML(e.VisualEditorTree)
+			}
+			e.CompiledPreview = mjmlResult
+		}
 	}
 
 	// Validate optional fields
@@ -373,16 +485,17 @@ func (w *WebTemplate) UnmarshalJSON(data []byte) error {
 
 // Request/Response types
 type CreateTemplateRequest struct {
-	WorkspaceID     string         `json:"workspace_id"`
-	ID              string         `json:"id"`
-	Name            string         `json:"name"`
-	Channel         string         `json:"channel"`
-	Email           *EmailTemplate `json:"email,omitempty"`
-	Web             *WebTemplate   `json:"web,omitempty"`
-	Category        string         `json:"category"`
-	TemplateMacroID *string        `json:"template_macro_id,omitempty"`
-	TestData        MapOfAny       `json:"test_data,omitempty"`
-	Settings        MapOfAny       `json:"settings,omitempty"`
+	WorkspaceID     string                          `json:"workspace_id"`
+	ID              string                          `json:"id"`
+	Name            string                          `json:"name"`
+	Channel         string                          `json:"channel"`
+	Email           *EmailTemplate                  `json:"email,omitempty"`
+	Web             *WebTemplate                    `json:"web,omitempty"`
+	Category        string                          `json:"category"`
+	TemplateMacroID *string                         `json:"template_macro_id,omitempty"`
+	TestData        MapOfAny                        `json:"test_data,omitempty"`
+	Settings        MapOfAny                        `json:"settings,omitempty"`
+	Translations    map[string]TemplateTranslation  `json:"translations,omitempty"`
 }
 
 func (r *CreateTemplateRequest) Validate() (template *Template, workspaceID string, err error) {
@@ -443,6 +556,10 @@ func (r *CreateTemplateRequest) Validate() (template *Template, workspaceID stri
 		}
 	}
 
+	if err := validateTranslations(r.Translations, r.Channel, r.TestData); err != nil {
+		return nil, "", fmt.Errorf("invalid create template request: %w", err)
+	}
+
 	return &Template{
 		ID:              r.ID,
 		Name:            r.Name,
@@ -454,6 +571,7 @@ func (r *CreateTemplateRequest) Validate() (template *Template, workspaceID stri
 		TemplateMacroID: r.TemplateMacroID,
 		TestData:        r.TestData,
 		Settings:        r.Settings,
+		Translations:    r.Translations,
 	}, r.WorkspaceID, nil
 }
 
@@ -521,16 +639,17 @@ func (r *GetTemplateRequest) FromURLParams(queryParams url.Values) (err error) {
 }
 
 type UpdateTemplateRequest struct {
-	WorkspaceID     string         `json:"workspace_id"`
-	ID              string         `json:"id"`
-	Name            string         `json:"name"`
-	Channel         string         `json:"channel"`
-	Email           *EmailTemplate `json:"email,omitempty"`
-	Web             *WebTemplate   `json:"web,omitempty"`
-	Category        string         `json:"category"`
-	TemplateMacroID *string        `json:"template_macro_id,omitempty"`
-	TestData        MapOfAny       `json:"test_data,omitempty"`
-	Settings        MapOfAny       `json:"settings,omitempty"`
+	WorkspaceID     string                          `json:"workspace_id"`
+	ID              string                          `json:"id"`
+	Name            string                          `json:"name"`
+	Channel         string                          `json:"channel"`
+	Email           *EmailTemplate                  `json:"email,omitempty"`
+	Web             *WebTemplate                    `json:"web,omitempty"`
+	Category        string                          `json:"category"`
+	TemplateMacroID *string                         `json:"template_macro_id,omitempty"`
+	TestData        MapOfAny                        `json:"test_data,omitempty"`
+	Settings        MapOfAny                        `json:"settings,omitempty"`
+	Translations    map[string]TemplateTranslation  `json:"translations,omitempty"`
 }
 
 func (r *UpdateTemplateRequest) Validate() (template *Template, workspaceID string, err error) {
@@ -591,6 +710,10 @@ func (r *UpdateTemplateRequest) Validate() (template *Template, workspaceID stri
 		}
 	}
 
+	if err := validateTranslations(r.Translations, r.Channel, r.TestData); err != nil {
+		return nil, "", fmt.Errorf("invalid update template request: %w", err)
+	}
+
 	return &Template{
 		ID:              r.ID,
 		Name:            r.Name,
@@ -601,6 +724,7 @@ func (r *UpdateTemplateRequest) Validate() (template *Template, workspaceID stri
 		TemplateMacroID: r.TemplateMacroID,
 		TestData:        r.TestData,
 		Settings:        r.Settings,
+		Translations:    r.Translations,
 	}, r.WorkspaceID, nil
 }
 
@@ -675,6 +799,15 @@ type ErrTemplateNotFound struct {
 }
 
 func (e *ErrTemplateNotFound) Error() string {
+	return e.Message
+}
+
+// ErrEditorModeChange is returned when attempting to switch a template's editor mode
+type ErrEditorModeChange struct {
+	Message string
+}
+
+func (e *ErrEditorModeChange) Error() string {
 	return e.Message
 }
 

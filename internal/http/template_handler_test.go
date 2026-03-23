@@ -2,6 +2,7 @@ package http_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -422,6 +423,90 @@ func TestTemplateHandler_HandleCreate(t *testing.T) {
 	}
 }
 
+func TestTemplateHandler_HandleCreate_WithTranslations(t *testing.T) {
+	mockService, _, serverURL, secretKey, cleanup := setupTemplateHandlerTest(t)
+	defer cleanup()
+
+	reqWithTranslations := domain.CreateTemplateRequest{
+		WorkspaceID: "workspace123",
+		ID:          "translatedTmpl",
+		Name:        "Translated Template",
+		Channel:     "email",
+		Category:    "transactional",
+		Email:       createTestEmailTemplate(),
+		Translations: map[string]domain.TemplateTranslation{
+			"fr": {Email: &domain.EmailTemplate{
+				SenderID:         "sender123",
+				Subject:          "Sujet FR",
+				CompiledPreview:  "<html>FR</html>",
+				VisualEditorTree: createTestEmailTemplate().VisualEditorTree,
+			}},
+		},
+	}
+
+	mockService.EXPECT().CreateTemplate(gomock.Any(), "workspace123", gomock.Any()).
+		DoAndReturn(func(ctx context.Context, wsID string, tmpl *domain.Template) error {
+			assert.NotNil(t, tmpl.Translations)
+			assert.Len(t, tmpl.Translations, 1)
+			fr, ok := tmpl.Translations["fr"]
+			assert.True(t, ok, "expected fr translation")
+			assert.NotNil(t, fr.Email)
+			assert.Equal(t, "Sujet FR", fr.Email.Subject)
+			return nil
+		})
+
+	resp := sendRequest(t, http.MethodPost, fmt.Sprintf("%s/api/templates.create", serverURL), createTestToken(secretKey), reqWithTranslations)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+}
+
+func TestTemplateHandler_HandleUpdate_WithTranslations(t *testing.T) {
+	mockService, _, serverURL, secretKey, cleanup := setupTemplateHandlerTest(t)
+	defer cleanup()
+
+	reqWithTranslations := domain.UpdateTemplateRequest{
+		WorkspaceID: "workspace123",
+		ID:          "translatedTmpl",
+		Name:        "Updated Translated Template",
+		Channel:     "email",
+		Category:    "transactional",
+		Email:       createTestEmailTemplate(),
+		Translations: map[string]domain.TemplateTranslation{
+			"fr": {Email: &domain.EmailTemplate{
+				SenderID:         "sender123",
+				Subject:          "Sujet FR mis à jour",
+				CompiledPreview:  "<html>FR updated</html>",
+				VisualEditorTree: createTestEmailTemplate().VisualEditorTree,
+			}},
+			"es": {Email: &domain.EmailTemplate{
+				SenderID:         "sender123",
+				Subject:          "Asunto ES",
+				CompiledPreview:  "<html>ES</html>",
+				VisualEditorTree: createTestEmailTemplate().VisualEditorTree,
+			}},
+		},
+	}
+
+	mockService.EXPECT().UpdateTemplate(gomock.Any(), "workspace123", gomock.Any()).
+		DoAndReturn(func(ctx context.Context, wsID string, tmpl *domain.Template) error {
+			assert.NotNil(t, tmpl.Translations)
+			assert.Len(t, tmpl.Translations, 2)
+			fr, ok := tmpl.Translations["fr"]
+			assert.True(t, ok, "expected fr translation")
+			assert.Equal(t, "Sujet FR mis à jour", fr.Email.Subject)
+			es, ok := tmpl.Translations["es"]
+			assert.True(t, ok, "expected es translation")
+			assert.Equal(t, "Asunto ES", es.Email.Subject)
+			return nil
+		})
+
+	resp := sendRequest(t, http.MethodPost, fmt.Sprintf("%s/api/templates.update", serverURL), createTestToken(secretKey), reqWithTranslations)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
 func TestTemplateHandler_HandleUpdate(t *testing.T) {
 	workspaceID := "workspace123"
 	templateID := "template1"
@@ -722,3 +807,90 @@ func TestHandleCompile_MethodNotAllowed(t *testing.T) {
 // func TestHandleCompile_BadRequest_ValidationError(t *testing.T) {
 // 	// ... (Original test code)
 // }
+
+func TestHandleCompile_WithMjmlSource(t *testing.T) {
+	mockService, _, serverURL, secretKey, cleanup := setupTemplateHandlerTest(t)
+	defer cleanup()
+
+	mjmlSrc := "<mjml><mj-body><mj-section><mj-column><mj-text>Hello</mj-text></mj-column></mj-section></mj-body></mjml>"
+	htmlOut := "<html><body>Hello</body></html>"
+
+	payload := map[string]interface{}{
+		"workspace_id": "workspace123",
+		"message_id":   "msg-1",
+		"mjml_source":  mjmlSrc,
+	}
+
+	mockService.EXPECT().CompileTemplate(gomock.Any(), gomock.Any()).Return(&domain.CompileTemplateResponse{
+		Success: true,
+		MJML:    &mjmlSrc,
+		HTML:    &htmlOut,
+	}, nil)
+
+	apiURL := fmt.Sprintf("%s/api/templates.compile", serverURL)
+	token := createTestToken(secretKey)
+	resp := sendRequest(t, http.MethodPost, apiURL, token, payload)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestHandleCreate_CodeModeTemplate(t *testing.T) {
+	mockService, _, serverURL, secretKey, cleanup := setupTemplateHandlerTest(t)
+	defer cleanup()
+
+	mjmlSrc := "<mjml><mj-body><mj-section><mj-column><mj-text>Hello</mj-text></mj-column></mj-section></mj-body></mjml>"
+
+	payload := map[string]interface{}{
+		"workspace_id": "workspace123",
+		"id":           "code-tmpl",
+		"name":         "Code Template",
+		"channel":      "email",
+		"category":     "marketing",
+		"email": map[string]interface{}{
+			"editor_mode":     "code",
+			"mjml_source":     mjmlSrc,
+			"subject":         "Test Subject",
+			"compiled_preview": mjmlSrc,
+		},
+	}
+
+	mockService.EXPECT().CreateTemplate(gomock.Any(), "workspace123", gomock.Any()).Return(nil)
+
+	apiURL := fmt.Sprintf("%s/api/templates.create", serverURL)
+	token := createTestToken(secretKey)
+	resp := sendRequest(t, http.MethodPost, apiURL, token, payload)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+}
+
+func TestHandleUpdate_CodeModeTemplate(t *testing.T) {
+	mockService, _, serverURL, secretKey, cleanup := setupTemplateHandlerTest(t)
+	defer cleanup()
+
+	mjmlSrc := "<mjml><mj-body><mj-section><mj-column><mj-text>Updated</mj-text></mj-column></mj-section></mj-body></mjml>"
+
+	payload := map[string]interface{}{
+		"workspace_id": "workspace123",
+		"id":           "code-tmpl",
+		"name":         "Code Template",
+		"channel":      "email",
+		"category":     "marketing",
+		"email": map[string]interface{}{
+			"editor_mode":     "code",
+			"mjml_source":     mjmlSrc,
+			"subject":         "Updated Subject",
+			"compiled_preview": mjmlSrc,
+		},
+	}
+
+	mockService.EXPECT().UpdateTemplate(gomock.Any(), "workspace123", gomock.Any()).Return(nil)
+
+	apiURL := fmt.Sprintf("%s/api/templates.update", serverURL)
+	token := createTestToken(secretKey)
+	resp := sendRequest(t, http.MethodPost, apiURL, token, payload)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}

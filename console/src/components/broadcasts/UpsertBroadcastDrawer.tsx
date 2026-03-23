@@ -596,7 +596,7 @@ export function UpsertBroadcastDrawer({
 
                     <Form.Item
                       name={['audience', 'exclude_unsubscribed']}
-                      label={t`Exclude unsubscribed recipients`}
+                      label={t`Exclude unsubscribed, bounced & complained recipients`}
                       valuePropName="checked"
                       initialValue={true}
                     >

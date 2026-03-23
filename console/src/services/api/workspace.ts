@@ -47,6 +47,8 @@ export interface WorkspaceSettings {
   custom_field_labels?: Record<string, string>
   blog_enabled?: boolean
   blog_settings?: BlogSettings
+  default_language: string
+  languages: string[]
 }
 
 export interface FileManagerSettings {
@@ -101,6 +103,7 @@ export interface SMTPSettings {
   encrypted_password?: string
   encrypted_username?: string
   use_tls: boolean
+  ehlo_hostname?: string
 
   // Authentication type: 'basic' (default) or 'oauth2'
   auth_type?: SMTPAuthType
@@ -151,6 +154,7 @@ export interface SparkPostSettings {
 export interface PostmarkSettings {
   server_token?: string
   encrypted_server_token?: string
+  message_stream?: string
 }
 
 export interface MailgunSettings {

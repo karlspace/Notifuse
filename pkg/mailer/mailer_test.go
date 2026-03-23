@@ -850,6 +850,52 @@ func TestSMTPMailer_createSMTPClient(t *testing.T) {
 		}
 	})
 
+	t.Run("production mode creates client with TLS enabled", func(t *testing.T) {
+		config := &Config{
+			SMTPHost:     "smtp.example.com",
+			SMTPPort:     587,
+			SMTPUsername: "username",
+			SMTPPassword: "password",
+			FromEmail:    "noreply@example.com",
+			FromName:     "Notifuse",
+			APIEndpoint:  "https://example.com",
+			UseTLS:       true,
+		}
+
+		mailer := NewSMTPMailer(config)
+		client, err := mailer.createSMTPClient()
+
+		if client == nil && err == nil {
+			t.Error("Expected either client or error, got both nil")
+		}
+		if client != nil && err != nil {
+			t.Error("Expected either client or error, got both non-nil")
+		}
+	})
+
+	t.Run("production mode creates client with TLS disabled", func(t *testing.T) {
+		config := &Config{
+			SMTPHost:     "smtp.example.com",
+			SMTPPort:     25,
+			SMTPUsername: "",
+			SMTPPassword: "",
+			FromEmail:    "noreply@example.com",
+			FromName:     "Notifuse",
+			APIEndpoint:  "https://example.com",
+			UseTLS:       false,
+		}
+
+		mailer := NewSMTPMailer(config)
+		client, err := mailer.createSMTPClient()
+
+		if client == nil && err == nil {
+			t.Error("Expected either client or error, got both nil")
+		}
+		if client != nil && err != nil {
+			t.Error("Expected either client or error, got both non-nil")
+		}
+	})
+
 	t.Run("invalid config causes error", func(t *testing.T) {
 		config := &Config{
 			SMTPHost:     "", // Invalid empty host

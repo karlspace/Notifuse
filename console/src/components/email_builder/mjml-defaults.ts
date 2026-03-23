@@ -15,10 +15,23 @@ export const MJ_BODY_DEFAULTS = {
 export const MJ_WRAPPER_DEFAULTS = {
   backgroundColor: 'transparent',
   fullWidthBackgroundColor: 'transparent',
+  backgroundUrl: '',
+  backgroundRepeat: 'no-repeat',
+  backgroundSize: 'auto',
+  backgroundPosition: 'top center',
+  border: 'none',
+  borderTop: 'none',
+  borderRight: 'none',
+  borderBottom: 'none',
+  borderLeft: 'none',
+  borderRadius: '0px',
+  direction: 'ltr' as const,
+  fullWidth: '' as const,
   paddingTop: '0px',
   paddingRight: '0px',
   paddingBottom: '0px',
   paddingLeft: '0px',
+  textAlign: 'center' as const,
   cssClass: ''
 }
 
@@ -52,6 +65,7 @@ export const MJ_SECTION_DEFAULTS = {
 export const MJ_COLUMN_DEFAULTS = {
   width: '100%',
   verticalAlign: 'top' as const,
+  direction: 'ltr' as const,
   backgroundColor: 'transparent',
   innerBackgroundColor: 'transparent',
   border: 'none',
@@ -77,6 +91,7 @@ export const MJ_COLUMN_DEFAULTS = {
 export const MJ_TEXT_DEFAULTS = {
   align: 'left' as const,
   color: '#000000',
+  containerBackgroundColor: 'transparent',
   fontFamily: 'Arial, sans-serif',
   fontSize: '13px',
   fontStyle: 'normal' as const,
@@ -88,7 +103,8 @@ export const MJ_TEXT_DEFAULTS = {
   paddingRight: '25px',
   paddingBottom: '10px',
   paddingLeft: '25px',
-  backgroundColor: 'transparent'
+  backgroundColor: 'transparent',
+  cssClass: ''
 }
 
 // mj-button defaults
@@ -98,6 +114,7 @@ export const MJ_BUTTON_DEFAULTS = {
   borderRadius: '3px',
   border: 'none',
   color: '#ffffff',
+  containerBackgroundColor: 'transparent',
   fontFamily: 'Arial, sans-serif',
   fontSize: '13px',
   fontStyle: 'normal' as const,
@@ -114,7 +131,8 @@ export const MJ_BUTTON_DEFAULTS = {
   textDecoration: 'none',
   textTransform: 'none' as const,
   verticalAlign: 'middle' as const,
-  rel: 'noopener noreferrer'
+  rel: 'noopener noreferrer',
+  cssClass: ''
 }
 
 // mj-image defaults
@@ -126,6 +144,7 @@ export const MJ_IMAGE_DEFAULTS = {
   border: 'none',
   borderRadius: '0px',
   containerBackgroundColor: 'transparent',
+  cssClass: '',
   fluidOnMobile: 'false' as const,
   height: 'auto',
   href: '',
@@ -192,6 +211,11 @@ export const MJ_RAW_DEFAULTS = {
   cssClass: ''
 }
 
+// mj-liquid defaults
+export const MJ_LIQUID_DEFAULTS = {
+  cssClass: ''
+}
+
 // mj-divider defaults
 export const MJ_DIVIDER_DEFAULTS = {
   align: 'center' as const,
@@ -199,6 +223,7 @@ export const MJ_DIVIDER_DEFAULTS = {
   borderStyle: 'solid' as const,
   borderWidth: '4px',
   containerBackgroundColor: 'transparent',
+  cssClass: '',
   paddingTop: '10px',
   paddingRight: '25px',
   paddingBottom: '10px',
@@ -210,6 +235,7 @@ export const MJ_DIVIDER_DEFAULTS = {
 export const MJ_SPACER_DEFAULTS = {
   height: '20px',
   containerBackgroundColor: 'transparent',
+  cssClass: '',
   paddingTop: '0px',
   paddingRight: '0px',
   paddingBottom: '0px',
@@ -221,6 +247,7 @@ export const MJ_SOCIAL_DEFAULTS = {
   align: 'center' as const,
   borderRadius: '3px',
   containerBackgroundColor: 'transparent',
+  cssClass: '',
   iconHeight: '20px',
   iconSize: '20px',
   innerPadding: '4px',
@@ -291,6 +318,7 @@ export const MJML_COMPONENT_DEFAULTS: Record<MJMLComponentType, Record<string, u
   'mj-title': MJ_TITLE_DEFAULTS,
   'mj-group': MJ_GROUP_DEFAULTS,
   'mj-raw': MJ_RAW_DEFAULTS,
+  'mj-liquid': MJ_LIQUID_DEFAULTS,
   'mj-divider': MJ_DIVIDER_DEFAULTS,
   'mj-spacer': MJ_SPACER_DEFAULTS,
   'mj-social': MJ_SOCIAL_DEFAULTS,

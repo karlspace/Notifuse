@@ -304,7 +304,7 @@ export class MjSectionBlock extends BaseEmailBlock {
   }
 
   getValidChildTypes(): MJMLComponentType[] {
-    return ['mj-column', 'mj-group', 'mj-raw']
+    return ['mj-column', 'mj-group', 'mj-raw', 'mj-liquid']
   }
 
   /**
@@ -373,6 +373,7 @@ export class MjSectionBlock extends BaseEmailBlock {
           }),
       margin: '0px auto',
       borderRadius: attrs.borderRadius !== '0px' ? attrs.borderRadius : undefined,
+      overflow: attrs.borderRadius !== '0px' ? 'hidden' : undefined,
       ...selectionStyle
     }
 
@@ -380,6 +381,7 @@ export class MjSectionBlock extends BaseEmailBlock {
     const tableStyle: React.CSSProperties = {
       backgroundColor: attrs.backgroundColor,
       width: '100%',
+      borderRadius: attrs.borderRadius !== '0px' ? attrs.borderRadius : undefined,
       borderTop: attrs.borderTop !== 'none' ? attrs.borderTop : undefined,
       borderRight: attrs.borderRight !== 'none' ? attrs.borderRight : undefined,
       borderBottom: attrs.borderBottom !== 'none' ? attrs.borderBottom : undefined,

@@ -12,6 +12,7 @@ import {
 } from '../../services/api/segment'
 import dayjs, { Dayjs } from 'dayjs'
 import { InputDimensionFilters } from './input_dimension_filters'
+import TemplateSelectorInput from '../templates/TemplateSelectorInput'
 import Messages from './messages'
 import { useLingui } from '@lingui/react/macro'
 
@@ -25,6 +26,7 @@ export type LeafFormProps = {
   cancelOrDeleteNode: () => void
   lists?: Array<{ id: string; name: string }>
   customFieldLabels?: Record<string, string>
+  workspaceId?: string
 }
 
 export const LeafContactForm = (props: LeafFormProps) => {
@@ -299,6 +301,40 @@ export const LeafActionForm = (props: LeafFormProps) => {
             </Form.Item>
           </Space>
         </div>
+
+        {/* Template filter - only shown for email event kinds */}
+        <Form.Item noStyle shouldUpdate>
+          {(funcs) => {
+            const kind = funcs.getFieldValue(['contact_timeline', 'kind'])
+            const emailKinds = ['open_email', 'click_email', 'bounce_email', 'complain_email', 'unsubscribe_email']
+
+            if (!emailKinds.includes(kind) || !props.workspaceId) {
+              return null
+            }
+
+            return (
+              <div className="mb-2">
+                <Space>
+                  <span className="opacity-60" style={{ lineHeight: '32px' }}>
+                    {t`template`}
+                  </span>
+                  <Form.Item
+                    noStyle
+                    name={['contact_timeline', 'template_id']}
+                    colon={false}
+                  >
+                    <TemplateSelectorInput
+                      workspaceId={props.workspaceId}
+                      placeholder={t`Any template`}
+                      clearable={true}
+                      size="small"
+                    />
+                  </Form.Item>
+                </Space>
+              </div>
+            )
+          }}
+        </Form.Item>
 
         <Space>
           <span className="opacity-60" style={{ lineHeight: '32px' }}>

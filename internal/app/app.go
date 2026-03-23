@@ -381,6 +381,8 @@ func (a *App) InitMailer() error {
 			FromEmail:    a.config.SMTP.FromEmail,
 			FromName:     a.config.SMTP.FromName,
 			APIEndpoint:  a.config.APIEndpoint,
+			UseTLS:       a.config.SMTP.UseTLS,
+			EHLOHostname: a.config.SMTP.EHLOHostname,
 		}
 
 		a.mailer = mailer.NewSMTPMailer(mailerConfig)
@@ -528,6 +530,7 @@ func (a *App) InitServices() error {
 	// Initialize template service
 	a.templateService = service.NewTemplateService(
 		a.templateRepo,
+		a.workspaceRepo,
 		a.authService,
 		a.logger,
 		a.config.APIEndpoint,
@@ -953,6 +956,7 @@ func (a *App) InitServices() error {
 		a.contactRepo,
 		a.workspaceRepo,
 		a.contactListRepo,
+		a.listRepo,
 		a.templateRepo,
 		a.emailQueueRepo,
 		a.messageHistoryRepo,

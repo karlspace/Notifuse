@@ -493,6 +493,14 @@ func (qb *QueryBuilder) parseContactTimelineConditions(timeline *domain.ContactT
 		}
 	}
 
+	// If template_id filter is specified, scope to specific template via message_history
+	if timeline.TemplateID != nil && *timeline.TemplateID != "" {
+		args = append(args, *timeline.TemplateID)
+		conditions = append(conditions, fmt.Sprintf(
+			"ct.entity_id IN (SELECT id FROM message_history WHERE template_id = $%d)", argIndex))
+		argIndex++
+	}
+
 	// Build the subquery WHERE clause
 	whereClause := strings.Join(conditions, " AND ")
 
@@ -1309,6 +1317,14 @@ func (qb *QueryBuilder) parseContactTimelineConditionsWithEmailRef(timeline *dom
 				argIndex = newArgIndex
 			}
 		}
+	}
+
+	// If template_id filter is specified, scope to specific template via message_history
+	if timeline.TemplateID != nil && *timeline.TemplateID != "" {
+		args = append(args, *timeline.TemplateID)
+		conditions = append(conditions, fmt.Sprintf(
+			"ct.entity_id IN (SELECT id FROM message_history WHERE template_id = $%d)", argIndex))
+		argIndex++
 	}
 
 	// Build the subquery WHERE clause

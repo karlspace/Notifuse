@@ -36,6 +36,8 @@ export interface Attachment {
 
 export interface EmailOptions {
   from_name?: string
+  subject?: string
+  subject_preview?: string
   reply_to?: string
   cc?: string[]
   bcc?: string[]
@@ -179,6 +181,7 @@ export const transactionalNotificationsApi = {
     integrationId: string,
     senderId: string,
     recipientEmail: string,
+    language?: string,
     email_options?: EmailOptions
   ): Promise<TestTemplateResponse> => {
     const request: TestTemplateRequest = {
@@ -187,6 +190,7 @@ export const transactionalNotificationsApi = {
       integration_id: integrationId,
       sender_id: senderId,
       recipient_email: recipientEmail,
+      language: language || undefined,
       email_options: email_options
     }
     return api.post<TestTemplateResponse>('/api/transactional.testTemplate', request)

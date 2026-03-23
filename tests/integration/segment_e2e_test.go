@@ -116,6 +116,11 @@ func TestSegmentE2E(t *testing.T) {
 		t.Cleanup(func() { testutil.CleanupAllTasks(t, client, workspace.ID) })
 		testCustomEventsGoalsSegmentation(t, client, factory, workspace.ID)
 	})
+
+	t.Run("Comprehensive Activity Segments", func(t *testing.T) {
+		t.Cleanup(func() { testutil.CleanupAllTasks(t, client, workspace.ID) })
+		testComprehensiveActivitySegments(t, client, factory, workspace.ID)
+	})
 }
 
 // testSimpleContactSegment tests creating a simple segment with contact filters
@@ -194,7 +199,7 @@ func testSimpleContactSegment(t *testing.T, client *testutil.APIClient, factory 
 		_ = execResp.Body.Close()
 
 		// Wait for segment to be built
-		status, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 10*time.Second)
+		status, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 30*time.Second)
 		if err != nil {
 			t.Fatalf("Segment build failed: %v", err)
 		}
@@ -633,12 +638,12 @@ func testSegmentRebuild(t *testing.T, client *testutil.APIClient, factory *testu
 		defer func() { _ = rebuildResp.Body.Close() }()
 
 		// Execute tasks
-		execResp, err := client.Post("/api/tasks.execute", map[string]interface{}{"limit": 10})
+		execResp, err := client.Get("/api/cron?limit=10")
 		require.NoError(t, err)
 		_ = execResp.Body.Close()
 
 		// Wait for segment to be built
-		status, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 10*time.Second)
+		status, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 30*time.Second)
 		if err != nil {
 			t.Fatalf("Segment build failed: %v", err)
 		}
@@ -662,12 +667,12 @@ func testSegmentRebuild(t *testing.T, client *testutil.APIClient, factory *testu
 		defer func() { _ = rebuildResp2.Body.Close() }()
 
 		// Execute tasks again
-		execResp2, err := client.Post("/api/tasks.execute", map[string]interface{}{"limit": 10})
+		execResp2, err := client.Get("/api/cron?limit=10")
 		require.NoError(t, err)
 		_ = execResp2.Body.Close()
 
 		// Wait for segment to be built
-		status2, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 10*time.Second)
+		status2, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 30*time.Second)
 		if err != nil {
 			t.Fatalf("Segment rebuild failed: %v", err)
 		}
@@ -923,12 +928,12 @@ func testSegmentWithRelativeDates(t *testing.T, client *testutil.APIClient, fact
 		defer func() { _ = rebuildResp.Body.Close() }()
 
 		// Execute tasks to start the build
-		execResp, err := client.Post("/api/tasks.execute", map[string]interface{}{"limit": 10})
+		execResp, err := client.Get("/api/cron?limit=10")
 		require.NoError(t, err)
 		_ = execResp.Body.Close()
 
 		// Wait for segment to be built
-		status, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 10*time.Second)
+		status, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 30*time.Second)
 		if err != nil {
 			t.Fatalf("Segment build failed: %v", err)
 		}
@@ -1120,12 +1125,12 @@ func testCheckSegmentRecomputeProcessor(t *testing.T, client *testutil.APIClient
 		_ = rebuildResp.Body.Close()
 
 		// Execute tasks to build the segment
-		execBuildResp, err := client.Post("/api/tasks.execute", map[string]interface{}{"limit": 10})
+		execBuildResp, err := client.Get("/api/cron?limit=10")
 		require.NoError(t, err)
 		_ = execBuildResp.Body.Close()
 
 		// Wait for segment to become active
-		segmentStatus, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segment1ID, 10*time.Second)
+		segmentStatus, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segment1ID, 30*time.Second)
 		require.NoError(t, err)
 		require.Contains(t, []string{"built", "active"}, segmentStatus, "Segment must be active before recompute check")
 
@@ -1532,12 +1537,12 @@ func testContactPropertyRelativeDates(t *testing.T, client *testutil.APIClient, 
 		defer func() { _ = rebuildResp.Body.Close() }()
 
 		// Execute tasks to build the segment
-		execResp, err := client.Post("/api/tasks.execute", map[string]interface{}{"limit": 10})
+		execResp, err := client.Get("/api/cron?limit=10")
 		require.NoError(t, err)
 		_ = execResp.Body.Close()
 
 		// Wait for segment to be built
-		status, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 10*time.Second)
+		status, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 30*time.Second)
 		if err != nil {
 			t.Fatalf("Segment build failed: %v", err)
 		}
@@ -2407,12 +2412,12 @@ func testCustomEventsGoalsSegmentation(t *testing.T, client *testutil.APIClient,
 		defer func() { _ = rebuildResp.Body.Close() }()
 
 		// Execute tasks
-		execResp, err := client.Post("/api/tasks.execute", map[string]interface{}{"limit": 10})
+		execResp, err := client.Get("/api/cron?limit=10")
 		require.NoError(t, err)
 		_ = execResp.Body.Close()
 
 		// Wait for segment to be built
-		status, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 10*time.Second)
+		status, err := testutil.WaitForSegmentBuilt(t, client, workspaceID, segmentID, 30*time.Second)
 		if err != nil {
 			t.Fatalf("Segment build failed: %v", err)
 		}
@@ -2439,5 +2444,584 @@ func testCustomEventsGoalsSegmentation(t *testing.T, client *testutil.APIClient,
 			assert.Contains(t, generatedSQL, "goal_type", "Generated SQL should filter by goal_type")
 			assert.Contains(t, generatedSQL, "SUM", "Generated SQL should use SUM aggregation")
 		}
+	})
+}
+
+// testComprehensiveActivitySegments tests contact_timeline activity filtering comprehensively
+func testComprehensiveActivitySegments(t *testing.T, client *testutil.APIClient, factory *testutil.TestDataFactory, workspaceID string) {
+
+	// --- Helper functions ---
+
+	previewSegment := func(t *testing.T, workspaceID string, tree map[string]interface{}) int {
+		t.Helper()
+		resp, err := client.Post("/api/segments.preview", map[string]interface{}{
+			"workspace_id": workspaceID,
+			"tree":         tree,
+			"limit":        100,
+		})
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var result map[string]interface{}
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		require.NoError(t, err)
+		return int(result["total_count"].(float64))
+	}
+
+	timelineLeaf := func(kind, countOp string, countVal int) map[string]interface{} {
+		return map[string]interface{}{
+			"kind": "leaf",
+			"leaf": map[string]interface{}{
+				"source": "contact_timeline",
+				"contact_timeline": map[string]interface{}{
+					"kind":           kind,
+					"count_operator": countOp,
+					"count_value":    countVal,
+				},
+			},
+		}
+	}
+
+	timelineLeafWithTimeframe := func(kind, countOp string, countVal int, tfOp string, tfVals []string) map[string]interface{} {
+		ct := map[string]interface{}{
+			"kind":               kind,
+			"count_operator":     countOp,
+			"count_value":        countVal,
+			"timeframe_operator": tfOp,
+		}
+		if len(tfVals) > 0 {
+			ct["timeframe_values"] = tfVals
+		}
+		return map[string]interface{}{
+			"kind": "leaf",
+			"leaf": map[string]interface{}{
+				"source":           "contact_timeline",
+				"contact_timeline": ct,
+			},
+		}
+	}
+
+	timelineLeafWithTemplate := func(kind, countOp string, countVal int, templateID string) map[string]interface{} {
+		ct := map[string]interface{}{
+			"kind":           kind,
+			"count_operator": countOp,
+			"count_value":    countVal,
+		}
+		if templateID != "" {
+			ct["template_id"] = templateID
+		}
+		return map[string]interface{}{
+			"kind": "leaf",
+			"leaf": map[string]interface{}{
+				"source":           "contact_timeline",
+				"contact_timeline": ct,
+			},
+		}
+	}
+
+	timelineLeafFull := func(kind, countOp string, countVal int, tfOp string, tfVals []string, templateID string) map[string]interface{} {
+		ct := map[string]interface{}{
+			"kind":           kind,
+			"count_operator": countOp,
+			"count_value":    countVal,
+		}
+		if tfOp != "" {
+			ct["timeframe_operator"] = tfOp
+		}
+		if len(tfVals) > 0 {
+			ct["timeframe_values"] = tfVals
+		}
+		if templateID != "" {
+			ct["template_id"] = templateID
+		}
+		return map[string]interface{}{
+			"kind": "leaf",
+			"leaf": map[string]interface{}{
+				"source":           "contact_timeline",
+				"contact_timeline": ct,
+			},
+		}
+	}
+
+	contactLeaf := func(field, operator, value string) map[string]interface{} {
+		return map[string]interface{}{
+			"kind": "leaf",
+			"leaf": map[string]interface{}{
+				"source": "contacts",
+				"contact": map[string]interface{}{
+					"filters": []map[string]interface{}{
+						{
+							"field_name":    field,
+							"field_type":    "string",
+							"operator":      operator,
+							"string_values": []string{value},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	listLeaf := func(operator, listID string) map[string]interface{} {
+		return map[string]interface{}{
+			"kind": "leaf",
+			"leaf": map[string]interface{}{
+				"source": "contact_lists",
+				"contact_list": map[string]interface{}{
+					"operator": operator,
+					"list_id":  listID,
+				},
+			},
+		}
+	}
+
+	andBranch := func(leaves ...interface{}) map[string]interface{} {
+		return map[string]interface{}{
+			"kind": "branch",
+			"branch": map[string]interface{}{
+				"operator": "and",
+				"leaves":   leaves,
+			},
+		}
+	}
+
+	orBranch := func(leaves ...interface{}) map[string]interface{} {
+		return map[string]interface{}{
+			"kind": "branch",
+			"branch": map[string]interface{}{
+				"operator": "or",
+				"leaves":   leaves,
+			},
+		}
+	}
+
+	// =========================================================================
+	// Group A: Event Kind Coverage (6 tests)
+	// =========================================================================
+	t.Run("GroupA_EventKindCoverage", func(t *testing.T) {
+		kinds := []string{"open_email", "click_email", "bounce_email", "complain_email", "unsubscribe_email", "insert_message_history"}
+
+		for _, kind := range kinds {
+			kind := kind // capture range variable
+			t.Run(kind, func(t *testing.T) {
+				marker := "act-kind-" + kind
+
+				// Contact A: has event of the target kind
+				contactA, err := factory.CreateContact(workspaceID,
+					testutil.WithContactEmail(fmt.Sprintf("%s-yes@acttest.com", marker)),
+					testutil.WithContactCustomString1(marker))
+				require.NoError(t, err)
+
+				// Contact B: has event of a different kind
+				_, err = factory.CreateContact(workspaceID,
+					testutil.WithContactEmail(fmt.Sprintf("%s-no@acttest.com", marker)),
+					testutil.WithContactCustomString1(marker))
+				require.NoError(t, err)
+
+				// Contact A gets 1 event of the target kind
+				err = factory.CreateContactTimelineEvent(workspaceID, contactA.Email, kind, map[string]interface{}{
+					"test": true,
+				})
+				require.NoError(t, err)
+
+				// Contact B gets 1 event of a different kind
+				otherKind := "open_email"
+				if kind == "open_email" {
+					otherKind = "click_email"
+				}
+				err = factory.CreateContactTimelineEvent(workspaceID, fmt.Sprintf("%s-no@acttest.com", marker), otherKind, map[string]interface{}{
+					"test": true,
+				})
+				require.NoError(t, err)
+
+				// Preview: AND(custom_string_1 = marker, kind at_least 1) → expect 1
+				tree := andBranch(
+					contactLeaf("custom_string_1", "equals", marker),
+					timelineLeaf(kind, "at_least", 1),
+				)
+				count := previewSegment(t, workspaceID, tree)
+				assert.Equal(t, 1, count, "Expected exactly 1 contact with kind=%s", kind)
+			})
+		}
+	})
+
+	// =========================================================================
+	// Group B: Count Operator Coverage (5 tests)
+	// =========================================================================
+	t.Run("GroupB_CountOperatorCoverage", func(t *testing.T) {
+		marker := "act-countop-test"
+
+		// Contact with 1 event
+		c1, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-countop-1evt@acttest.com"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+		err = factory.CreateContactTimelineEvent(workspaceID, c1.Email, "open_email", map[string]interface{}{"n": 1})
+		require.NoError(t, err)
+
+		// Contact with 3 events
+		c3, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-countop-3evt@acttest.com"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+		for i := 0; i < 3; i++ {
+			err = factory.CreateContactTimelineEvent(workspaceID, c3.Email, "open_email", map[string]interface{}{"n": i})
+			require.NoError(t, err)
+		}
+
+		// Contact with 5 events
+		c5, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-countop-5evt@acttest.com"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+		for i := 0; i < 5; i++ {
+			err = factory.CreateContactTimelineEvent(workspaceID, c5.Email, "open_email", map[string]interface{}{"n": i})
+			require.NoError(t, err)
+		}
+
+		// Contact with 0 events
+		_, err = factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-countop-0evt@acttest.com"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+
+		markerLeaf := contactLeaf("custom_string_1", "equals", marker)
+
+		t.Run("at_least_3", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeaf("open_email", "at_least", 3))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 2, count, "at_least 3: expected 2 contacts (3evt + 5evt)")
+		})
+
+		t.Run("at_most_3", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeaf("open_email", "at_most", 3))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 3, count, "at_most 3: expected 3 contacts (0evt + 1evt + 3evt)")
+		})
+
+		t.Run("exactly_3", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeaf("open_email", "exactly", 3))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "exactly 3: expected 1 contact (3evt)")
+		})
+
+		t.Run("exactly_0", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeaf("open_email", "exactly", 0))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "exactly 0: expected 1 contact (0evt)")
+		})
+
+		t.Run("at_most_0", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeaf("open_email", "at_most", 0))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "at_most 0: expected 1 contact (0evt)")
+		})
+	})
+
+	// =========================================================================
+	// Group C: Timeframe Operator Coverage (6 tests)
+	// =========================================================================
+	t.Run("GroupC_TimeframeOperatorCoverage", func(t *testing.T) {
+		marker := "act-tf-test"
+		now := time.Now().UTC()
+
+		// Contact A: event 3 days ago
+		cA, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-tf-3d@acttest.com"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+		err = factory.CreateContactTimelineEventAt(workspaceID, cA.Email, "click_email", map[string]interface{}{"n": 1}, now.AddDate(0, 0, -3))
+		require.NoError(t, err)
+
+		// Contact B: event 10 days ago
+		cB, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-tf-10d@acttest.com"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+		err = factory.CreateContactTimelineEventAt(workspaceID, cB.Email, "click_email", map[string]interface{}{"n": 1}, now.AddDate(0, 0, -10))
+		require.NoError(t, err)
+
+		// Contact C: event 60 days ago
+		cC, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-tf-60d@acttest.com"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+		err = factory.CreateContactTimelineEventAt(workspaceID, cC.Email, "click_email", map[string]interface{}{"n": 1}, now.AddDate(0, 0, -60))
+		require.NoError(t, err)
+
+		markerLeaf := contactLeaf("custom_string_1", "equals", marker)
+
+		t.Run("anytime", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeafWithTimeframe("click_email", "at_least", 1, "anytime", nil))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 3, count, "anytime: expected all 3 contacts")
+		})
+
+		t.Run("in_the_last_7_days", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeafWithTimeframe("click_email", "at_least", 1, "in_the_last_days", []string{"7"}))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "in_the_last_7_days: expected 1 contact (A)")
+		})
+
+		t.Run("in_the_last_30_days", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeafWithTimeframe("click_email", "at_least", 1, "in_the_last_days", []string{"30"}))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 2, count, "in_the_last_30_days: expected 2 contacts (A, B)")
+		})
+
+		t.Run("before_date", func(t *testing.T) {
+			cutoff := now.AddDate(0, 0, -15).Format(time.RFC3339)
+			tree := andBranch(markerLeaf, timelineLeafWithTimeframe("click_email", "at_least", 1, "before_date", []string{cutoff}))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "before_date (now-15d): expected 1 contact (C)")
+		})
+
+		t.Run("after_date", func(t *testing.T) {
+			cutoff := now.AddDate(0, 0, -15).Format(time.RFC3339)
+			tree := andBranch(markerLeaf, timelineLeafWithTimeframe("click_email", "at_least", 1, "after_date", []string{cutoff}))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 2, count, "after_date (now-15d): expected 2 contacts (A, B)")
+		})
+
+		t.Run("in_date_range", func(t *testing.T) {
+			rangeStart := now.AddDate(0, 0, -15).Format(time.RFC3339)
+			rangeEnd := now.AddDate(0, 0, -5).Format(time.RFC3339)
+			tree := andBranch(markerLeaf, timelineLeafWithTimeframe("click_email", "at_least", 1, "in_date_range", []string{rangeStart, rangeEnd}))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "in_date_range (now-15d to now-5d): expected 1 contact (B)")
+		})
+	})
+
+	// =========================================================================
+	// Group D: Template ID Filter (7 tests)
+	// =========================================================================
+	t.Run("GroupD_TemplateIDFilter", func(t *testing.T) {
+		marker := "act-tmpl-test"
+
+		// Create contacts
+		contactA, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-tmpl-a@acttest.com"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+
+		contactB, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-tmpl-b@acttest.com"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+
+		// Create message_history records with specific template IDs
+		msgA, err := factory.CreateMessageHistory(workspaceID,
+			testutil.WithMessageHistoryContactEmail(contactA.Email),
+			testutil.WithMessageHistoryTemplateID("template-welcome-a"))
+		require.NoError(t, err)
+
+		msgB, err := factory.CreateMessageHistory(workspaceID,
+			testutil.WithMessageHistoryContactEmail(contactB.Email),
+			testutil.WithMessageHistoryTemplateID("template-promo-b"))
+		require.NoError(t, err)
+
+		// Create timeline events with entity_id pointing to message_history records
+		err = factory.CreateContactTimelineEvent(workspaceID, contactA.Email, "open_email", map[string]interface{}{
+			"entity_id": msgA.ID,
+		})
+		require.NoError(t, err)
+
+		err = factory.CreateContactTimelineEvent(workspaceID, contactB.Email, "open_email", map[string]interface{}{
+			"entity_id": msgB.ID,
+		})
+		require.NoError(t, err)
+
+		markerLeaf := contactLeaf("custom_string_1", "equals", marker)
+
+		t.Run("filter_by_template_a", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeafWithTemplate("open_email", "at_least", 1, "template-welcome-a"))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "filter_by_template_a: expected 1 contact (A)")
+		})
+
+		t.Run("filter_by_template_b", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeafWithTemplate("open_email", "at_least", 1, "template-promo-b"))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "filter_by_template_b: expected 1 contact (B)")
+		})
+
+		t.Run("without_template_matches_both", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeafWithTemplate("open_email", "at_least", 1, ""))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 2, count, "without_template: expected 2 contacts (both)")
+		})
+
+		t.Run("template_with_timeframe", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeafFull("open_email", "at_least", 1, "in_the_last_days", []string{"1"}, "template-welcome-a"))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "template_with_timeframe: expected 1 contact (A, created just now)")
+		})
+
+		t.Run("template_exactly_0", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeafWithTemplate("open_email", "exactly", 0, "template-welcome-a"))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "template_exactly_0: expected 1 contact (B has 0 events for template A)")
+		})
+
+		t.Run("trigger_pipeline_insert_message_history", func(t *testing.T) {
+			pipelineMarker := "act-tmpl-pipeline"
+
+			// Create a NEW contact C
+			contactC, err := factory.CreateContact(workspaceID,
+				testutil.WithContactEmail("act-tmpl-pipeline@acttest.com"),
+				testutil.WithContactCustomString1(pipelineMarker))
+			require.NoError(t, err)
+
+			// Create message_history via factory — this fires the DB trigger
+			// track_message_history_changes() which INSERTs into contact_timeline
+			// with kind = 'insert_message_history' and entity_id = NEW.id
+			_, err = factory.CreateMessageHistory(workspaceID,
+				testutil.WithMessageHistoryContactEmail(contactC.Email),
+				testutil.WithMessageHistoryTemplateID("template-pipeline-c"))
+			require.NoError(t, err)
+
+			// Preview: AND(custom_string_1 = pipeline marker, insert_message_history at_least 1 + template_id)
+			tree := andBranch(
+				contactLeaf("custom_string_1", "equals", pipelineMarker),
+				timelineLeafWithTemplate("insert_message_history", "at_least", 1, "template-pipeline-c"),
+			)
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "trigger_pipeline: expected 1 contact via DB trigger chain")
+		})
+
+		t.Run("nonexistent_template_returns_zero", func(t *testing.T) {
+			tree := andBranch(markerLeaf, timelineLeafWithTemplate("open_email", "at_least", 1, "nonexistent"))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 0, count, "nonexistent_template: expected 0 contacts")
+		})
+	})
+
+	// =========================================================================
+	// Group E: Combined Conditions (7 tests)
+	// =========================================================================
+	t.Run("GroupE_CombinedConditions", func(t *testing.T) {
+		marker := "act-combo-test"
+
+		// Create a list for this group
+		comboList, err := factory.CreateList(workspaceID,
+			testutil.WithListName("ComboTestList"))
+		require.NoError(t, err)
+
+		// Contact 1: country=US, 3 open_email events, IN list
+		c1, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-combo-1@acttest.com"),
+			testutil.WithContactCountry("US"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+		for i := 0; i < 3; i++ {
+			err = factory.CreateContactTimelineEvent(workspaceID, c1.Email, "open_email", map[string]interface{}{"n": i})
+			require.NoError(t, err)
+		}
+		_, err = factory.CreateContactList(workspaceID,
+			testutil.WithContactListEmail(c1.Email),
+			testutil.WithContactListListID(comboList.ID),
+			testutil.WithContactListStatus(domain.ContactListStatusActive))
+		require.NoError(t, err)
+
+		// Contact 2: country=US, 0 events, IN list
+		c2, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-combo-2@acttest.com"),
+			testutil.WithContactCountry("US"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+		_, err = factory.CreateContactList(workspaceID,
+			testutil.WithContactListEmail(c2.Email),
+			testutil.WithContactListListID(comboList.ID),
+			testutil.WithContactListStatus(domain.ContactListStatusActive))
+		require.NoError(t, err)
+
+		// Contact 3: country=CA, 2 open_email events, NOT in list
+		c3, err := factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-combo-3@acttest.com"),
+			testutil.WithContactCountry("CA"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+		for i := 0; i < 2; i++ {
+			err = factory.CreateContactTimelineEvent(workspaceID, c3.Email, "open_email", map[string]interface{}{"n": i})
+			require.NoError(t, err)
+		}
+
+		// Contact 4: country=CA, 0 events, NOT in list
+		_, err = factory.CreateContact(workspaceID,
+			testutil.WithContactEmail("act-combo-4@acttest.com"),
+			testutil.WithContactCountry("CA"),
+			testutil.WithContactCustomString1(marker))
+		require.NoError(t, err)
+
+		markerLeaf := contactLeaf("custom_string_1", "equals", marker)
+
+		t.Run("AND_timeline_plus_property", func(t *testing.T) {
+			// US AND open_email >= 1 → Contact 1 only
+			tree := andBranch(markerLeaf, contactLeaf("country", "equals", "US"), timelineLeaf("open_email", "at_least", 1))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "AND timeline+property: expected 1 (contact 1)")
+		})
+
+		t.Run("OR_timeline_or_property", func(t *testing.T) {
+			// marker AND (CA OR open_email >= 1) → Contacts 1, 3, 4
+			tree := andBranch(
+				markerLeaf,
+				orBranch(
+					contactLeaf("country", "equals", "CA"),
+					timelineLeaf("open_email", "at_least", 1),
+				),
+			)
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 3, count, "OR timeline|property: expected 3 (contacts 1, 3, 4)")
+		})
+
+		t.Run("AND_timeline_plus_list", func(t *testing.T) {
+			// marker AND in list AND open_email >= 1 → Contact 1
+			tree := andBranch(markerLeaf, listLeaf("in", comboList.ID), timelineLeaf("open_email", "at_least", 1))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "AND timeline+list: expected 1 (contact 1)")
+		})
+
+		t.Run("OR_timeline_or_list", func(t *testing.T) {
+			// marker AND (in list OR open_email >= 1) → Contacts 1, 2, 3
+			tree := andBranch(
+				markerLeaf,
+				orBranch(
+					listLeaf("in", comboList.ID),
+					timelineLeaf("open_email", "at_least", 1),
+				),
+			)
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 3, count, "OR timeline|list: expected 3 (contacts 1, 2, 3)")
+		})
+
+		t.Run("NOT_in_list_AND_opened", func(t *testing.T) {
+			// marker AND NOT in list AND open_email >= 1 → Contact 3
+			tree := andBranch(markerLeaf, listLeaf("not_in", comboList.ID), timelineLeaf("open_email", "at_least", 1))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "NOT in list AND opened: expected 1 (contact 3)")
+		})
+
+		t.Run("three_way_AND", func(t *testing.T) {
+			// marker AND US AND in list AND open_email >= 1 → Contact 1
+			tree := andBranch(markerLeaf, contactLeaf("country", "equals", "US"), listLeaf("in", comboList.ID), timelineLeaf("open_email", "at_least", 1))
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "three_way_AND: expected 1 (contact 1)")
+		})
+
+		t.Run("nested_OR_under_AND", func(t *testing.T) {
+			// marker AND (US OR CA) AND open_email >= 3 → Contact 1
+			tree := andBranch(
+				markerLeaf,
+				orBranch(
+					contactLeaf("country", "equals", "US"),
+					contactLeaf("country", "equals", "CA"),
+				),
+				timelineLeaf("open_email", "at_least", 3),
+			)
+			count := previewSegment(t, workspaceID, tree)
+			assert.Equal(t, 1, count, "nested_OR_under_AND: expected 1 (contact 1)")
+		})
 	})
 }

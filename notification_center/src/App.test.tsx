@@ -36,6 +36,7 @@ vi.mock('./api/notification_center', () => ({
   }),
   subscribeToLists: vi.fn().mockResolvedValue({ success: true }),
   unsubscribeOneClick: vi.fn().mockResolvedValue({ success: true }),
+  updateContactPreferences: vi.fn().mockResolvedValue({ success: true }),
   parseNotificationCenterParams: vi.fn(),
 }))
 
@@ -423,6 +424,75 @@ describe('Notification Center App', () => {
       await waitFor(() => {
         expect(mockParseParams).toHaveBeenCalled()
       })
+    })
+  })
+
+  describe('Language auto-save', () => {
+    it('should auto-save language when contact has no language set', async () => {
+      const mockUpdatePreferences = vi.mocked(notificationCenterApi.updateContactPreferences)
+      const mockGetPreferences = vi.mocked(notificationCenterApi.getContactPreferences)
+      const mockParseParams = vi.mocked(notificationCenterApi.parseNotificationCenterParams)
+
+      // Contact has no language set
+      mockGetPreferences.mockResolvedValue({
+        contact: {
+          id: 'contact-123',
+          email: 'test@example.com',
+          first_name: 'John',
+          last_name: 'Doe',
+        },
+        public_lists: [],
+        contact_lists: [],
+        logo_url: 'https://example.com/logo.png',
+        website_url: 'https://example.com',
+      })
+
+      mockParseParams.mockReturnValue(testData.validParams)
+      mockURLSearchParams(testData.validParams)
+
+      render(<App />)
+
+      await waitFor(() => {
+        expect(mockUpdatePreferences).toHaveBeenCalled()
+        const callArgs = mockUpdatePreferences.mock.calls[0][0]
+        expect(callArgs.language).toBeDefined()
+      })
+    })
+
+    it('should NOT auto-save language when contact already has a language', async () => {
+      const mockUpdatePreferences = vi.mocked(notificationCenterApi.updateContactPreferences)
+      const mockGetPreferences = vi.mocked(notificationCenterApi.getContactPreferences)
+      const mockParseParams = vi.mocked(notificationCenterApi.parseNotificationCenterParams)
+
+      // Contact already has a language set
+      mockGetPreferences.mockResolvedValue({
+        contact: {
+          id: 'contact-123',
+          email: 'test@example.com',
+          first_name: 'John',
+          last_name: 'Doe',
+          language: 'fr',
+        },
+        public_lists: [],
+        contact_lists: [],
+        logo_url: 'https://example.com/logo.png',
+        website_url: 'https://example.com',
+      })
+
+      mockParseParams.mockReturnValue(testData.validParams)
+      mockURLSearchParams(testData.validParams)
+
+      render(<App />)
+
+      await waitFor(() => {
+        expect(mockGetPreferences).toHaveBeenCalled()
+      })
+
+      // If updateContactPreferences was called, it should NOT include language
+      if (mockUpdatePreferences.mock.calls.length > 0) {
+        const callArgs = mockUpdatePreferences.mock.calls[0][0]
+        expect(callArgs.language).toBeUndefined()
+      }
     })
   })
 

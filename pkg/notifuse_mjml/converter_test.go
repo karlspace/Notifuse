@@ -738,3 +738,198 @@ func TestFormatSingleAttribute(t *testing.T) {
 		})
 	}
 }
+
+func TestEndToEnd_MjAttributesGlobalsPreserved(t *testing.T) {
+	// Build full tree via JSON: mjml > head > mj-attributes > [mj-all, mj-text] + body > section > column > mj-text
+	fullJSON := `{
+		"id": "mjml-1",
+		"type": "mjml",
+		"children": [
+			{
+				"id": "head-1",
+				"type": "mj-head",
+				"children": [
+					{
+						"id": "attrs-1",
+						"type": "mj-attributes",
+						"children": [
+							{"id":"all-1","type":"mj-all","attributes":{"fontFamily":"Helvetica"}},
+							{"id":"text-def","type":"mj-text","attributes":{"color":"#333333"}}
+						]
+					}
+				]
+			},
+			{
+				"id": "body-1",
+				"type": "mj-body",
+				"children": [
+					{
+						"id": "section-1",
+						"type": "mj-section",
+						"children": [
+							{
+								"id": "column-1",
+								"type": "mj-column",
+								"children": [
+									{"id":"text-1","type":"mj-text","content":"Hello"}
+								]
+							}
+						]
+					}
+				]
+			}
+		]
+	}`
+
+	block, err := UnmarshalEmailBlock([]byte(fullJSON))
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	// Convert to MJML string
+	mjmlOutput := ConvertJSONToMJML(block)
+
+	// Behavior: mj-all appears in the MJML output with its attributes
+	if !strings.Contains(mjmlOutput, `<mj-all font-family="Helvetica"`) {
+		t.Errorf("Expected mj-all with font-family in output, got:\n%s", mjmlOutput)
+	}
+
+	// Behavior: body mj-text with no stored attributes produces a tag without inline attributes
+	// (so mj-attributes globals can take effect at render time)
+	if !strings.Contains(mjmlOutput, `<mj-text>Hello</mj-text>`) {
+		t.Errorf("Expected body mj-text without inline attributes, got:\n%s", mjmlOutput)
+	}
+}
+
+func TestMJLiquidDirectOutput(t *testing.T) {
+	content := `{% for item in items %}<mj-column><mj-text>{{ item.name }}</mj-text></mj-column>{% endfor %}`
+	base := NewBaseBlock("liq", MJMLComponentMjLiquid)
+	base.Content = stringPtr(content)
+
+	section := &MJSectionBlock{BaseBlock: NewBaseBlock("sec", MJMLComponentMjSection)}
+	section.Children = []EmailBlock{&MJLiquidBlock{BaseBlock: base}}
+
+	result := ConvertJSONToMJMLRaw(section)
+	if strings.Contains(result, "<mj-liquid") {
+		t.Errorf("Result should not contain <mj-liquid tag, got: %s", result)
+	}
+	if strings.Contains(result, "</mj-liquid>") {
+		t.Errorf("Result should not contain </mj-liquid> tag, got: %s", result)
+	}
+	if !strings.Contains(result, "{% for item in items %}") {
+		t.Errorf("Result should contain Liquid for-loop, got: %s", result)
+	}
+	if !strings.Contains(result, "<mj-section") {
+		t.Errorf("Result should contain <mj-section, got: %s", result)
+	}
+}
+
+func TestMJLiquidEmptyContent(t *testing.T) {
+	base := NewBaseBlock("liq", MJMLComponentMjLiquid)
+	block := &MJLiquidBlock{BaseBlock: base}
+
+	column := &MJColumnBlock{BaseBlock: NewBaseBlock("col", MJMLComponentMjColumn)}
+	column.Children = []EmailBlock{block}
+
+	result := ConvertJSONToMJMLRaw(column)
+	if strings.Contains(result, "mj-liquid") {
+		t.Errorf("Result should not contain mj-liquid, got: %s", result)
+	}
+}
+
+func TestMJLiquidInsideColumn(t *testing.T) {
+	base := NewBaseBlock("liq", MJMLComponentMjLiquid)
+	base.Content = stringPtr(`{% if show %}<mj-image src="test.jpg" />{% endif %}`)
+
+	column := &MJColumnBlock{BaseBlock: NewBaseBlock("col", MJMLComponentMjColumn)}
+	column.Children = []EmailBlock{&MJLiquidBlock{BaseBlock: base}}
+
+	result := ConvertJSONToMJMLRaw(column)
+	if !strings.Contains(result, "{% if show %}") {
+		t.Errorf("Result should contain Liquid conditional, got: %s", result)
+	}
+	if strings.Contains(result, "<mj-liquid") {
+		t.Errorf("Result should not contain <mj-liquid tag, got: %s", result)
+	}
+}
+
+func TestMJLiquidMixedWithRegularBlocks(t *testing.T) {
+	text := &MJTextBlock{BaseBlock: NewBaseBlock("txt", MJMLComponentMjText)}
+	text.Content = stringPtr("Hello World")
+
+	liqBase := NewBaseBlock("liq", MJMLComponentMjLiquid)
+	liqBase.Content = stringPtr(`{% if extra %}<mj-text>Extra</mj-text>{% endif %}`)
+
+	column := &MJColumnBlock{BaseBlock: NewBaseBlock("col", MJMLComponentMjColumn)}
+	column.Children = []EmailBlock{text, &MJLiquidBlock{BaseBlock: liqBase}}
+
+	result := ConvertJSONToMJMLRaw(column)
+	if !strings.Contains(result, "Hello World</mj-text>") {
+		t.Errorf("Result should contain regular text block content, got: %s", result)
+	}
+	if !strings.Contains(result, "{% if extra %}") {
+		t.Errorf("Result should contain Liquid conditional, got: %s", result)
+	}
+	if strings.Contains(result, "<mj-liquid") {
+		t.Errorf("Result should not contain <mj-liquid tag, got: %s", result)
+	}
+}
+
+func TestMJLiquidEmptyStringContent(t *testing.T) {
+	base := NewBaseBlock("liq", MJMLComponentMjLiquid)
+	base.Content = stringPtr("")
+	block := &MJLiquidBlock{BaseBlock: base}
+
+	column := &MJColumnBlock{BaseBlock: NewBaseBlock("col", MJMLComponentMjColumn)}
+	column.Children = []EmailBlock{block}
+
+	result := ConvertJSONToMJMLRaw(column)
+	if strings.Contains(result, "mj-liquid") {
+		t.Errorf("Result should not contain mj-liquid, got: %s", result)
+	}
+}
+
+func TestMJLiquidContentWithSpecialChars(t *testing.T) {
+	base := NewBaseBlock("liq", MJMLComponentMjLiquid)
+	base.Content = stringPtr(`{% if show %}<mj-text>Price: $5 &amp; free shipping</mj-text>{% endif %}`)
+
+	section := &MJSectionBlock{BaseBlock: NewBaseBlock("sec", MJMLComponentMjSection)}
+	section.Children = []EmailBlock{&MJLiquidBlock{BaseBlock: base}}
+
+	result := ConvertJSONToMJMLRaw(section)
+	if !strings.Contains(result, "&amp;") {
+		t.Errorf("Result should preserve HTML entities in content, got: %s", result)
+	}
+	if !strings.Contains(result, "{% if show %}") {
+		t.Errorf("Result should preserve Liquid syntax, got: %s", result)
+	}
+	if strings.Contains(result, "<mj-liquid") {
+		t.Errorf("Result should not contain <mj-liquid tag, got: %s", result)
+	}
+}
+
+func TestMJLiquidNotPerBlockProcessed(t *testing.T) {
+	base := NewBaseBlock("liq", MJMLComponentMjLiquid)
+	base.Content = stringPtr(`{% for item in items %}<mj-text>{{ item.name }}</mj-text>{% endfor %}`)
+
+	section := &MJSectionBlock{BaseBlock: NewBaseBlock("sec", MJMLComponentMjSection)}
+	section.Children = []EmailBlock{&MJLiquidBlock{BaseBlock: base}}
+
+	body := &MJBodyBlock{BaseBlock: NewBaseBlock("body", MJMLComponentMjBody)}
+	body.Children = []EmailBlock{section}
+
+	root := &MJMLBlock{BaseBlock: NewBaseBlock("mjml", MJMLComponentMjml)}
+	root.Children = []EmailBlock{body}
+
+	result, err := ConvertJSONToMJMLWithData(root, `{"items": [{"name": "A"}]}`)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	// Liquid should NOT be rendered per-block — still raw
+	if !strings.Contains(result, "{% for item in items %}") {
+		t.Errorf("Liquid syntax should be preserved (not per-block processed), got: %s", result)
+	}
+	if strings.Contains(result, "<mj-liquid") {
+		t.Errorf("Result should not contain <mj-liquid tag, got: %s", result)
+	}
+}

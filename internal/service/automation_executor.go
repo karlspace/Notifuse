@@ -31,6 +31,7 @@ func NewAutomationExecutor(
 	contactRepo domain.ContactRepository,
 	workspaceRepo domain.WorkspaceRepository,
 	contactListRepo domain.ContactListRepository,
+	listRepo domain.ListRepository,
 	templateRepo domain.TemplateRepository,
 	emailQueueRepo domain.EmailQueueRepository,
 	messageRepo domain.MessageHistoryRepository,
@@ -43,7 +44,7 @@ func NewAutomationExecutor(
 	executors := map[domain.NodeType]NodeExecutor{
 		domain.NodeTypeTrigger:          NewTriggerNodeExecutor(),
 		domain.NodeTypeDelay:            NewDelayNodeExecutor(),
-		domain.NodeTypeEmail:            NewEmailNodeExecutor(emailQueueRepo, templateRepo, workspaceRepo, apiEndpoint, log),
+		domain.NodeTypeEmail:            NewEmailNodeExecutor(emailQueueRepo, templateRepo, workspaceRepo, listRepo, apiEndpoint, log),
 		domain.NodeTypeBranch:           NewBranchNodeExecutor(qb, workspaceRepo),
 		domain.NodeTypeFilter:           NewFilterNodeExecutor(qb, workspaceRepo),
 		domain.NodeTypeAddToList:        NewAddToListNodeExecutor(contactListRepo),

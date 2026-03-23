@@ -79,6 +79,7 @@ export interface ContactTimelineCondition {
   kind: string
   count_operator: CountOperator
   count_value: number
+  template_id?: string
   timeframe_operator?: TimeframeOperator
   timeframe_values?: string[]
   filters?: DimensionFilter[]

@@ -1358,6 +1358,78 @@ func TestQueryBuilder_ContactTimeline(t *testing.T) {
 		assert.Contains(t, sql, "ct.kind = $3")
 		assert.Equal(t, []interface{}{"US", "list123", "purchase", 1}, args)
 	})
+
+	t.Run("timeline with template_id filter", func(t *testing.T) {
+		templateID := "welcome-email"
+		tree := &domain.TreeNode{
+			Kind: "leaf",
+			Leaf: &domain.TreeNodeLeaf{
+				Source: "contact_timeline",
+				ContactTimeline: &domain.ContactTimelineCondition{
+					Kind:          "open_email",
+					CountOperator: "at_least",
+					CountValue:    1,
+					TemplateID:    &templateID,
+				},
+			},
+		}
+
+		sql, args, err := qb.BuildSQL(tree)
+		require.NoError(t, err)
+
+		assert.Contains(t, sql, "ct.kind = $1")
+		assert.Contains(t, sql, "ct.entity_id IN (SELECT id FROM message_history WHERE template_id = $2)")
+		assert.Contains(t, sql, ">= $3")
+		assert.Equal(t, []interface{}{"open_email", "welcome-email", 1}, args)
+	})
+
+	t.Run("timeline without template_id - unchanged SQL", func(t *testing.T) {
+		tree := &domain.TreeNode{
+			Kind: "leaf",
+			Leaf: &domain.TreeNodeLeaf{
+				Source: "contact_timeline",
+				ContactTimeline: &domain.ContactTimelineCondition{
+					Kind:          "open_email",
+					CountOperator: "at_least",
+					CountValue:    1,
+				},
+			},
+		}
+
+		sql, args, err := qb.BuildSQL(tree)
+		require.NoError(t, err)
+
+		assert.NotContains(t, sql, "message_history")
+		assert.Equal(t, []interface{}{"open_email", 1}, args)
+	})
+
+	t.Run("timeline with template_id and timeframe", func(t *testing.T) {
+		templateID := "promo-email"
+		timeframeOp := "in_the_last_days"
+		tree := &domain.TreeNode{
+			Kind: "leaf",
+			Leaf: &domain.TreeNodeLeaf{
+				Source: "contact_timeline",
+				ContactTimeline: &domain.ContactTimelineCondition{
+					Kind:              "click_email",
+					CountOperator:     "at_least",
+					CountValue:        2,
+					TemplateID:        &templateID,
+					TimeframeOperator: &timeframeOp,
+					TimeframeValues:   []string{"30"},
+				},
+			},
+		}
+
+		sql, args, err := qb.BuildSQL(tree)
+		require.NoError(t, err)
+
+		assert.Contains(t, sql, "ct.kind = $1")
+		assert.Contains(t, sql, "ct.entity_id IN (SELECT id FROM message_history WHERE template_id = $2)")
+		assert.Contains(t, sql, "ct.created_at > NOW() - INTERVAL '30 days'")
+		assert.Contains(t, sql, ">= $3")
+		assert.Equal(t, []interface{}{"click_email", "promo-email", 2}, args)
+	})
 }
 
 func TestQueryBuilder_BuildSQL_JSONFiltering(t *testing.T) {
@@ -1983,5 +2055,28 @@ func TestQueryBuilder_BuildTriggerCondition(t *testing.T) {
 		assert.Contains(t, sql, "custom_number_1 >= $2")
 		assert.Contains(t, sql, " AND ")
 		assert.Equal(t, []interface{}{"US", 100.0}, args)
+	})
+
+	t.Run("timeline with template_id filter using email ref", func(t *testing.T) {
+		templateID := "welcome-email"
+		tree := &domain.TreeNode{
+			Kind: "leaf",
+			Leaf: &domain.TreeNodeLeaf{
+				Source: "contact_timeline",
+				ContactTimeline: &domain.ContactTimelineCondition{
+					Kind:          "open_email",
+					CountOperator: "at_least",
+					CountValue:    1,
+					TemplateID:    &templateID,
+				},
+			},
+		}
+
+		sql, args, err := qb.BuildTriggerCondition(tree, "NEW.email")
+		require.NoError(t, err)
+
+		assert.Contains(t, sql, "ct.email = NEW.email")
+		assert.Contains(t, sql, "ct.entity_id IN (SELECT id FROM message_history WHERE template_id = $2)")
+		assert.Equal(t, []interface{}{"open_email", "welcome-email", 1}, args)
 	})
 }

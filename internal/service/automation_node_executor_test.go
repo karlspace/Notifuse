@@ -42,6 +42,7 @@ func createTestWorkspaceWithEmailProvider() *domain.Workspace {
 		Settings: domain.WorkspaceSettings{
 			EmailTrackingEnabled:     true,
 			MarketingEmailProviderID: integrationID,
+			SecretKey:                "test-secret-key-for-automation-1234",
 		},
 		Integrations: []domain.Integration{
 			{
@@ -467,91 +468,6 @@ func TestFindDefaultPath(t *testing.T) {
 	})
 }
 
-func TestBuildAutomationTemplateData(t *testing.T) {
-	t.Run("builds data from contact", func(t *testing.T) {
-		firstName := &domain.NullableString{String: "John", IsNull: false}
-		lastName := &domain.NullableString{String: "Doe", IsNull: false}
-
-		contact := &domain.Contact{
-			Email:     "john@example.com",
-			FirstName: firstName,
-			LastName:  lastName,
-		}
-
-		automation := &domain.Automation{
-			ID:   "auto123",
-			Name: "Test Automation",
-		}
-
-		data := buildAutomationTemplateData(contact, automation)
-
-		assert.Equal(t, "john@example.com", data["email"])
-		assert.Equal(t, "John", data["first_name"])
-		assert.Equal(t, "Doe", data["last_name"])
-		assert.Equal(t, "auto123", data["automation_id"])
-		assert.Equal(t, "Test Automation", data["automation_name"])
-	})
-
-	t.Run("handles nil contact", func(t *testing.T) {
-		automation := &domain.Automation{
-			ID:   "auto123",
-			Name: "Test Automation",
-		}
-
-		data := buildAutomationTemplateData(nil, automation)
-
-		assert.NotContains(t, data, "email")
-		assert.Equal(t, "auto123", data["automation_id"])
-	})
-
-	t.Run("handles nil automation", func(t *testing.T) {
-		contact := &domain.Contact{
-			Email: "john@example.com",
-		}
-
-		data := buildAutomationTemplateData(contact, nil)
-
-		assert.Equal(t, "john@example.com", data["email"])
-		assert.NotContains(t, data, "automation_id")
-	})
-
-	t.Run("handles null nullable fields", func(t *testing.T) {
-		firstName := &domain.NullableString{String: "", IsNull: true}
-
-		contact := &domain.Contact{
-			Email:     "john@example.com",
-			FirstName: firstName,
-		}
-
-		data := buildAutomationTemplateData(contact, nil)
-
-		assert.Equal(t, "john@example.com", data["email"])
-		assert.NotContains(t, data, "first_name")
-	})
-
-	t.Run("contact data renders correctly in liquid templates", func(t *testing.T) {
-		// This test verifies that {{ contact.first_name }} works correctly
-		// Bug: if contact is passed as raw struct, NullableString fields render as "&{John false}"
-		contact := &domain.Contact{
-			Email:     "john@example.com",
-			FirstName: &domain.NullableString{String: "John", IsNull: false},
-			LastName:  &domain.NullableString{String: "Doe", IsNull: false},
-		}
-
-		data := buildAutomationTemplateData(contact, nil)
-
-		// Test that liquid template renders contact.first_name correctly
-		result, err := notifuse_mjml.ProcessLiquidTemplate(
-			"Hello {{ contact.first_name }} {{ contact.last_name }}!",
-			data,
-			"test_subject",
-		)
-
-		require.NoError(t, err)
-		assert.Equal(t, "Hello John Doe!", result, "contact fields should render as plain strings, not struct representations")
-	})
-}
-
 func TestEmailNodeExecutor_Execute_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -559,9 +475,10 @@ func TestEmailNodeExecutor_Execute_Success(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	workspace := createTestWorkspaceWithEmailProvider()
 	template := createTestTemplate()
@@ -573,6 +490,10 @@ func TestEmailNodeExecutor_Execute_Success(t *testing.T) {
 	mockTemplateRepo.EXPECT().
 		GetTemplateByID(gomock.Any(), "ws1", "tpl123", int64(0)).
 		Return(template, nil)
+
+	mockListRepo.EXPECT().
+		GetListByID(gomock.Any(), "ws1", "list1").
+		Return(&domain.List{ID: "list1", Name: "Test List"}, nil)
 
 	mockEmailQueueRepo.EXPECT().
 		Enqueue(gomock.Any(), "ws1", gomock.Any()).
@@ -596,8 +517,9 @@ func TestEmailNodeExecutor_Execute_Success(t *testing.T) {
 			Email: "recipient@example.com",
 		},
 		Automation: &domain.Automation{
-			ID:   "auto1",
-			Name: "Test Automation",
+			ID:     "auto1",
+			Name:   "Test Automation",
+			ListID: "list1",
 		},
 	}
 
@@ -621,9 +543,10 @@ func TestEmailNodeExecutor_Execute_NilContactData(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	params := NodeExecutionParams{
 		WorkspaceID: "ws1",
@@ -658,9 +581,10 @@ func TestEmailNodeExecutor_Execute_NilAutomation(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	params := NodeExecutionParams{
 		WorkspaceID: "ws1",
@@ -694,9 +618,10 @@ func TestEmailNodeExecutor_Execute_InvalidConfig(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	params := NodeExecutionParams{
 		WorkspaceID: "ws1",
@@ -733,9 +658,10 @@ func TestEmailNodeExecutor_Execute_WorkspaceNotFound(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	mockWorkspaceRepo.EXPECT().
 		GetByID(gomock.Any(), "ws1").
@@ -776,9 +702,10 @@ func TestEmailNodeExecutor_Execute_NoEmailProvider(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	// Workspace without email provider
 	workspace := &domain.Workspace{
@@ -826,9 +753,10 @@ func TestEmailNodeExecutor_Execute_EnqueueFailed(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	workspace := createTestWorkspaceWithEmailProvider()
 	template := createTestTemplate()
@@ -840,6 +768,10 @@ func TestEmailNodeExecutor_Execute_EnqueueFailed(t *testing.T) {
 	mockTemplateRepo.EXPECT().
 		GetTemplateByID(gomock.Any(), "ws1", "tpl123", int64(0)).
 		Return(template, nil)
+
+	mockListRepo.EXPECT().
+		GetListByID(gomock.Any(), "ws1", "list1").
+		Return(&domain.List{ID: "list1", Name: "Test List"}, nil)
 
 	mockEmailQueueRepo.EXPECT().
 		Enqueue(gomock.Any(), "ws1", gomock.Any()).
@@ -862,8 +794,9 @@ func TestEmailNodeExecutor_Execute_EnqueueFailed(t *testing.T) {
 			Email: "recipient@example.com",
 		},
 		Automation: &domain.Automation{
-			ID:   "auto1",
-			Name: "Test Automation",
+			ID:     "auto1",
+			Name:   "Test Automation",
+			ListID: "list1",
 		},
 	}
 
@@ -880,9 +813,10 @@ func TestEmailNodeExecutor_Execute_WithCustomEndpoint(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	customEndpoint := "https://custom.endpoint.com"
 	workspace := createTestWorkspaceWithEmailProvider()
@@ -896,6 +830,10 @@ func TestEmailNodeExecutor_Execute_WithCustomEndpoint(t *testing.T) {
 	mockTemplateRepo.EXPECT().
 		GetTemplateByID(gomock.Any(), "ws1", "tpl123", int64(0)).
 		Return(template, nil)
+
+	mockListRepo.EXPECT().
+		GetListByID(gomock.Any(), "ws1", "list1").
+		Return(&domain.List{ID: "list1", Name: "Test List"}, nil)
 
 	mockEmailQueueRepo.EXPECT().
 		Enqueue(gomock.Any(), "ws1", gomock.Any()).
@@ -919,8 +857,9 @@ func TestEmailNodeExecutor_Execute_WithCustomEndpoint(t *testing.T) {
 			Email: "recipient@example.com",
 		},
 		Automation: &domain.Automation{
-			ID:   "auto1",
-			Name: "Test Automation",
+			ID:     "auto1",
+			Name:   "Test Automation",
+			ListID: "list1",
 		},
 	}
 
@@ -936,9 +875,10 @@ func TestEmailNodeExecutor_Execute_WithIntegrationOverride(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	overrideIntegrationID := "override_integration456"
 	workspace := createTestWorkspaceWithEmailProvider()
@@ -977,6 +917,10 @@ func TestEmailNodeExecutor_Execute_WithIntegrationOverride(t *testing.T) {
 		GetTemplateByID(gomock.Any(), "ws1", "tpl123", int64(0)).
 		Return(template, nil)
 
+	mockListRepo.EXPECT().
+		GetListByID(gomock.Any(), "ws1", "list1").
+		Return(&domain.List{ID: "list1", Name: "Test List"}, nil)
+
 	// Capture the enqueue call to verify the correct integration ID is used
 	mockEmailQueueRepo.EXPECT().
 		Enqueue(gomock.Any(), "ws1", gomock.Any()).
@@ -1005,8 +949,9 @@ func TestEmailNodeExecutor_Execute_WithIntegrationOverride(t *testing.T) {
 			Email: "recipient@example.com",
 		},
 		Automation: &domain.Automation{
-			ID:   "auto1",
-			Name: "Test Automation",
+			ID:     "auto1",
+			Name:   "Test Automation",
+			ListID: "list1",
 		},
 	}
 
@@ -1024,9 +969,10 @@ func TestEmailNodeExecutor_Execute_IntegrationOverrideNotFound(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	workspace := createTestWorkspaceWithEmailProvider()
 
@@ -1070,9 +1016,10 @@ func TestEmailNodeExecutor_Execute_IntegrationOverrideNotEmailType(t *testing.T)
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	workspace := createTestWorkspaceWithEmailProvider()
 	// Add a non-email integration (Supabase)
@@ -1122,9 +1069,10 @@ func TestEmailNodeExecutor_NodeType(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 	assert.Equal(t, domain.NodeTypeEmail, executor.NodeType())
 }
 
@@ -1135,9 +1083,10 @@ func TestEmailNodeExecutor_Execute_PreservesReplyTo(t *testing.T) {
 	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
 	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
 	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
 	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
 
-	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, "https://api.example.com", mockLogger)
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
 
 	workspace := createTestWorkspaceWithEmailProvider()
 
@@ -1162,6 +1111,10 @@ func TestEmailNodeExecutor_Execute_PreservesReplyTo(t *testing.T) {
 	mockTemplateRepo.EXPECT().
 		GetTemplateByID(gomock.Any(), "ws1", "tpl123", int64(0)).
 		Return(templateWithReplyTo, nil)
+
+	mockListRepo.EXPECT().
+		GetListByID(gomock.Any(), "ws1", "list1").
+		Return(&domain.List{ID: "list1", Name: "Test List"}, nil)
 
 	// Verify that the enqueued entry has ReplyTo set correctly
 	mockEmailQueueRepo.EXPECT().
@@ -1195,14 +1148,204 @@ func TestEmailNodeExecutor_Execute_PreservesReplyTo(t *testing.T) {
 			Email: "recipient@example.com",
 		},
 		Automation: &domain.Automation{
-			ID:   "auto1",
-			Name: "Test Automation",
+			ID:     "auto1",
+			Name:   "Test Automation",
+			ListID: "list1",
 		},
 	}
 
 	result, err := executor.Execute(context.Background(), params)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+}
+
+func TestEmailNodeExecutor_Execute_GeneratesTemplateURLs(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
+	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
+	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
+	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
+
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
+
+	workspace := createTestWorkspaceWithEmailProvider()
+	template := createTestTemplate()
+
+	mockWorkspaceRepo.EXPECT().
+		GetByID(gomock.Any(), "ws1").
+		Return(workspace, nil)
+
+	mockTemplateRepo.EXPECT().
+		GetTemplateByID(gomock.Any(), "ws1", "tpl123", int64(0)).
+		Return(template, nil)
+
+	mockListRepo.EXPECT().
+		GetListByID(gomock.Any(), "ws1", "list1").
+		Return(&domain.List{ID: "list1", Name: "Test List"}, nil)
+
+	// Capture the enqueue call to verify List-Unsubscribe URL is set
+	mockEmailQueueRepo.EXPECT().
+		Enqueue(gomock.Any(), "ws1", gomock.Any()).
+		DoAndReturn(func(ctx context.Context, workspaceID string, entries []*domain.EmailQueueEntry) error {
+			require.Len(t, entries, 1)
+			entry := entries[0]
+
+			assert.NotEmpty(t, entry.Payload.EmailOptions.ListUnsubscribeURL,
+				"ListUnsubscribeURL should be set from oneclick_unsubscribe_url")
+			assert.Contains(t, entry.Payload.EmailOptions.ListUnsubscribeURL, "unsubscribe-oneclick",
+				"ListUnsubscribeURL should contain unsubscribe-oneclick path")
+			assert.Contains(t, entry.Payload.EmailOptions.ListUnsubscribeURL, "lids=list1",
+				"ListUnsubscribeURL should contain the list ID")
+
+			return nil
+		})
+
+	params := NodeExecutionParams{
+		WorkspaceID: "ws1",
+		Node: &domain.AutomationNode{
+			ID:         "email_node1",
+			Type:       domain.NodeTypeEmail,
+			NextNodeID: strPtr("next_node"),
+			Config: map[string]interface{}{
+				"template_id": "tpl123",
+			},
+		},
+		Contact: &domain.ContactAutomation{
+			ID:           "ca1",
+			ContactEmail: "recipient@example.com",
+		},
+		ContactData: &domain.Contact{
+			Email: "recipient@example.com",
+		},
+		Automation: &domain.Automation{
+			ID:     "auto1",
+			Name:   "Test Automation",
+			ListID: "list1",
+		},
+	}
+
+	result, err := executor.Execute(context.Background(), params)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
+func TestEmailNodeExecutor_Execute_NoListID_StillWorks(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
+	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
+	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
+	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
+
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
+
+	workspace := createTestWorkspaceWithEmailProvider()
+	template := createTestTemplate()
+
+	mockWorkspaceRepo.EXPECT().
+		GetByID(gomock.Any(), "ws1").
+		Return(workspace, nil)
+
+	mockTemplateRepo.EXPECT().
+		GetTemplateByID(gomock.Any(), "ws1", "tpl123", int64(0)).
+		Return(template, nil)
+
+	// No GetListByID call expected since ListID is empty
+
+	mockEmailQueueRepo.EXPECT().
+		Enqueue(gomock.Any(), "ws1", gomock.Any()).
+		Return(nil)
+
+	params := NodeExecutionParams{
+		WorkspaceID: "ws1",
+		Node: &domain.AutomationNode{
+			ID:         "email_node1",
+			Type:       domain.NodeTypeEmail,
+			NextNodeID: strPtr("next_node"),
+			Config: map[string]interface{}{
+				"template_id": "tpl123",
+			},
+		},
+		Contact: &domain.ContactAutomation{
+			ID:           "ca1",
+			ContactEmail: "recipient@example.com",
+		},
+		ContactData: &domain.Contact{
+			Email: "recipient@example.com",
+		},
+		Automation: &domain.Automation{
+			ID:     "auto1",
+			Name:   "Test Automation",
+			ListID: "", // No list ID
+		},
+	}
+
+	result, err := executor.Execute(context.Background(), params)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "next_node", *result.NextNodeID)
+}
+
+func TestEmailNodeExecutor_Execute_ListRepoError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockEmailQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
+	mockTemplateRepo := mocks.NewMockTemplateRepository(ctrl)
+	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockListRepo := mocks.NewMockListRepository(ctrl)
+	mockLogger := setupMockLoggerForNodeExecutor(ctrl)
+
+	executor := NewEmailNodeExecutor(mockEmailQueueRepo, mockTemplateRepo, mockWorkspaceRepo, mockListRepo, "https://api.example.com", mockLogger)
+
+	workspace := createTestWorkspaceWithEmailProvider()
+	template := createTestTemplate()
+
+	mockWorkspaceRepo.EXPECT().
+		GetByID(gomock.Any(), "ws1").
+		Return(workspace, nil)
+
+	mockTemplateRepo.EXPECT().
+		GetTemplateByID(gomock.Any(), "ws1", "tpl123", int64(0)).
+		Return(template, nil)
+
+	mockListRepo.EXPECT().
+		GetListByID(gomock.Any(), "ws1", "list1").
+		Return(nil, errors.New("list not found"))
+
+	params := NodeExecutionParams{
+		WorkspaceID: "ws1",
+		Node: &domain.AutomationNode{
+			ID:         "email_node1",
+			Type:       domain.NodeTypeEmail,
+			NextNodeID: strPtr("next_node"),
+			Config: map[string]interface{}{
+				"template_id": "tpl123",
+			},
+		},
+		Contact: &domain.ContactAutomation{
+			ID:           "ca1",
+			ContactEmail: "recipient@example.com",
+		},
+		ContactData: &domain.Contact{
+			Email: "recipient@example.com",
+		},
+		Automation: &domain.Automation{
+			ID:     "auto1",
+			Name:   "Test Automation",
+			ListID: "list1",
+		},
+	}
+
+	result, err := executor.Execute(context.Background(), params)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "failed to get list")
 }
 
 // buildSimpleCondition creates a simple TreeNode condition for testing

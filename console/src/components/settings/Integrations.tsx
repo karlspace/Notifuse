@@ -72,7 +72,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { SettingsSectionHeader } from './SettingsSectionHeader'
 
 // Provider types that only support transactional emails, not marketing emails
-const transactionalEmailOnly: EmailProviderKind[] = ['postmark']
+const transactionalEmailOnly: EmailProviderKind[] = []
 
 // Helper function to generate Supabase webhook URLs
 const generateSupabaseWebhookURL = (
@@ -609,7 +609,12 @@ export function Integrations({ workspace, onSave, loading, isOwner }: Integratio
       ses: integration.email_provider.ses,
       smtp: integration.email_provider.smtp,
       sparkpost: integration.email_provider.sparkpost,
-      postmark: integration.email_provider.postmark,
+      postmark: integration.email_provider.postmark
+        ? {
+            ...integration.email_provider.postmark,
+            message_stream: integration.email_provider.postmark.message_stream || 'outbound'
+          }
+        : undefined,
       mailgun: integration.email_provider.mailgun,
       mailjet: integration.email_provider.mailjet,
       sendgrid: integration.email_provider.sendgrid
@@ -1702,6 +1707,13 @@ export function Integrations({ workspace, onSave, loading, isOwner }: Integratio
                 )
               }}
             </Form.Item>
+            <Form.Item
+              name={['smtp', 'ehlo_hostname']}
+              label={t`EHLO Hostname`}
+              tooltip={t`The hostname your server identifies itself as when connecting to the SMTP server. Defaults to the SMTP host value if empty.`}
+            >
+              <Input placeholder={t`Defaults to SMTP host`} disabled={!isOwner} />
+            </Form.Item>
 
             <Collapse
               ghost
@@ -2013,13 +2025,23 @@ export function Integrations({ workspace, onSave, loading, isOwner }: Integratio
         )}
 
         {providerType === 'postmark' && (
-          <Form.Item
-            name={['postmark', 'server_token']}
-            label={t`Server Token`}
-            rules={[{ required: true }]}
-          >
-            <Input.Password placeholder="Server Token" disabled={!isOwner} />
-          </Form.Item>
+          <>
+            <Form.Item
+              name={['postmark', 'server_token']}
+              label={t`Server Token`}
+              rules={[{ required: true }]}
+            >
+              <Input.Password placeholder="Server Token" disabled={!isOwner} />
+            </Form.Item>
+            <Form.Item
+              name={['postmark', 'message_stream']}
+              label={t`Message Stream`}
+              initialValue="outbound"
+              extra={t`Postmark Message Stream ID (e.g. "outbound" for transactional, "broadcast" for marketing)`}
+            >
+              <Input placeholder="outbound" disabled={!isOwner} />
+            </Form.Item>
+          </>
         )}
 
         {providerType === 'mailgun' && (
@@ -2215,6 +2237,13 @@ export function Integrations({ workspace, onSave, loading, isOwner }: Integratio
           )}
         </Descriptions.Item>
       )
+      if (provider.smtp.ehlo_hostname) {
+        items.push(
+          <Descriptions.Item key="ehlo" label={t`EHLO Hostname`}>
+            {provider.smtp.ehlo_hostname}
+          </Descriptions.Item>
+        )
+      }
       if (provider.smtp.bounce_address) {
         items.push(
           <Descriptions.Item key="bounce_address" label={t`Bounce Address`}>
@@ -2255,6 +2284,12 @@ export function Integrations({ workspace, onSave, loading, isOwner }: Integratio
         </Descriptions.Item>,
         <Descriptions.Item key="region" label={t`Region`}>
           {provider.mailgun.region || 'US'}
+        </Descriptions.Item>
+      )
+    } else if (provider.kind === 'postmark' && provider.postmark) {
+      items.push(
+        <Descriptions.Item key="message_stream" label={t`Message Stream`}>
+          {provider.postmark.message_stream || 'outbound'}
         </Descriptions.Item>
       )
     } else if (provider.kind === 'mailjet' && provider.mailjet) {
