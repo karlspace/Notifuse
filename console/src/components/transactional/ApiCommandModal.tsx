@@ -131,6 +131,7 @@ export const ApiCommandModal: React.FC<ApiCommandModalProps> = ({
 }
 
 interface EmailOptions {
+  subject?: string;
   reply_to?: string;
   cc?: string[];
   bcc?: string[];

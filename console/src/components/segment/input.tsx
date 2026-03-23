@@ -20,6 +20,8 @@ import {
 import type { CascaderProps } from 'antd'
 import dayjs from 'dayjs'
 import { useLingui } from '@lingui/react/macro'
+import { useQuery } from '@tanstack/react-query'
+import { templatesApi } from '../../services/api/template'
 
 // Format date for display (converts ISO8601 to readable format)
 const formatDateDisplay = (dateStr: string | undefined): string => {
@@ -58,6 +60,7 @@ export type TreeNodeInputProps = {
   onChange?: (updatedValue: TreeNode) => void
   schemas: SegmentSchemas
   lists?: List[]
+  workspaceId?: string
   customFieldLabels?: Record<string, string>
 }
 
@@ -88,6 +91,12 @@ const getColorClass = (colorID: number): string => {
 export const TreeNodeInput = (props: TreeNodeInputProps) => {
   const { t } = useLingui()
   const [editingNodeLeaf, setEditingNodeLeaf] = useState<EditingNodeLeaf | undefined>(undefined)
+
+  const { data: templatesData } = useQuery({
+    queryKey: ['templates', props.workspaceId],
+    queryFn: () => templatesApi.list({ workspace_id: props.workspaceId!, channel: 'email' }),
+    enabled: !!props.workspaceId,
+  })
 
   const cascaderOptions = useMemo(() => {
     const options: CascaderOption[] = [
@@ -507,6 +516,7 @@ export const TreeNodeInput = (props: TreeNodeInputProps) => {
               setEditingNodeLeaf={setEditingNodeLeaf}
               cancelOrDeleteNode={cancelOrDeleteNode.bind(null, path, pathKey)}
               customFieldLabels={props.customFieldLabels}
+              workspaceId={props.workspaceId}
             />
           )}
         </div>
@@ -722,6 +732,16 @@ export const TreeNodeInput = (props: TreeNodeInputProps) => {
                         t`New message (email...)`}
                     </Tag>
                   </div>
+                  {node.leaf?.contact_timeline?.template_id && (
+                    <div className="mb-2">
+                      <span className="opacity-60 pr-3">{t`template`}</span>
+                      <Tag bordered={false} color="blue">
+                        {templatesData?.templates?.find(
+                          (tpl) => tpl.id === node.leaf?.contact_timeline?.template_id
+                        )?.name || node.leaf?.contact_timeline?.template_id}
+                      </Tag>
+                    </div>
+                  )}
                   <Space>
                     <span className="opacity-60">{t`happened`}</span>
                     <Tag bordered={false} color="blue">

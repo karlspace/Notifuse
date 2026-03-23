@@ -390,6 +390,46 @@ func (tdf *TestDataFactory) CreateContactTimelineEvent(workspaceID, email, kind 
 	return nil
 }
 
+// CreateContactTimelineEventAt creates a timeline event for a contact at a specific timestamp
+func (tdf *TestDataFactory) CreateContactTimelineEventAt(workspaceID, email, kind string, metadata map[string]interface{}, createdAt time.Time) error {
+	// Get workspace database connection
+	workspaceDB, err := tdf.workspaceRepo.GetConnection(context.Background(), workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get workspace database: %w", err)
+	}
+
+	// Extract entity_id and entity_type from metadata if present
+	var entityID *string
+	entityType := "message_history" // default
+	if metadata != nil {
+		if id, ok := metadata["entity_id"].(string); ok && id != "" {
+			entityID = &id
+		}
+		if et, ok := metadata["entity_type"].(string); ok && et != "" {
+			entityType = et
+		}
+	}
+
+	// Serialize metadata to JSON
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Insert timeline event directly into workspace database
+	query := `
+		INSERT INTO contact_timeline (email, operation, entity_type, kind, changes, entity_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+
+	_, err = workspaceDB.ExecContext(context.Background(), query, email, "insert", entityType, kind, metadataJSON, entityID, createdAt)
+	if err != nil {
+		return fmt.Errorf("failed to insert contact timeline event: %w", err)
+	}
+
+	return nil
+}
+
 // CreateCustomEvent creates a custom event which triggers the timeline event with proper format
 // This is used for testing automations with custom_event triggers
 func (tdf *TestDataFactory) CreateCustomEvent(workspaceID, email, eventName string, properties map[string]interface{}) error {
@@ -742,6 +782,14 @@ func WithCustomDomain(customDomain string) WorkspaceOption {
 	}
 }
 
+// WithWorkspaceDefaultLanguage sets the default language and available languages for a workspace
+func WithWorkspaceDefaultLanguage(defaultLang string, languages []string) WorkspaceOption {
+	return func(w *domain.Workspace) {
+		w.Settings.DefaultLanguage = defaultLang
+		w.Settings.Languages = languages
+	}
+}
+
 func WithBlogEnabled(enabled bool) WorkspaceOption {
 	return func(w *domain.Workspace) {
 		w.Settings.BlogEnabled = enabled
@@ -861,7 +909,25 @@ func WithTemplateSubject(subject string) TemplateOption {
 func WithTemplateEmailContent(content string) TemplateOption {
 	return func(t *domain.Template) {
 		if t.Email != nil {
-			t.Email.VisualEditorTree = createMJMLBlockWithContent(content)
+			t.Email.VisualEditorTree = CreateMJMLBlockWithContent(content)
+		}
+	}
+}
+
+// WithTemplateTranslations sets the translations map on a template
+func WithTemplateTranslations(translations map[string]domain.TemplateTranslation) TemplateOption {
+	return func(t *domain.Template) {
+		t.Translations = translations
+	}
+}
+
+// WithCodeModeTemplate sets the template to code mode with the given MJML source
+func WithCodeModeTemplate(mjmlSource string) TemplateOption {
+	return func(t *domain.Template) {
+		if t.Email != nil {
+			t.Email.EditorMode = domain.EditorModeCode
+			t.Email.MjmlSource = &mjmlSource
+			t.Email.CompiledPreview = mjmlSource
 		}
 	}
 }
@@ -1188,9 +1254,9 @@ func createDefaultMJMLBlock() notifuse_mjml.EmailBlock {
 	return block
 }
 
-// createMJMLBlockWithContent creates an MJML block with custom text content
+// CreateMJMLBlockWithContent creates an MJML block with custom text content
 // This allows testing Liquid template variables in the email body
-func createMJMLBlockWithContent(content string) notifuse_mjml.EmailBlock {
+func CreateMJMLBlockWithContent(content string) notifuse_mjml.EmailBlock {
 	textBlockMap := map[string]interface{}{
 		"id":      "text-1",
 		"type":    "mj-text",

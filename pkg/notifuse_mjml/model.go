@@ -33,6 +33,9 @@ const (
 	MJMLComponentMjStyle          MJMLComponentType = "mj-style"
 	MJMLComponentMjTitle          MJMLComponentType = "mj-title"
 	MJMLComponentMjRaw            MJMLComponentType = "mj-raw"
+	MJMLComponentMjLiquid         MJMLComponentType = "mj-liquid"
+	MJMLComponentMjAll            MJMLComponentType = "mj-all"
+	MJMLComponentMjClass          MJMLComponentType = "mj-class"
 )
 
 // Common attribute interfaces
@@ -379,6 +382,10 @@ type MJRawBlock struct {
 	*BaseBlock
 }
 
+type MJLiquidBlock struct {
+	*BaseBlock
+}
+
 // Email builder state types
 type EmailBuilderState struct {
 	SelectedBlockID *string      `json:"selectedBlockId,omitempty"`
@@ -564,38 +571,23 @@ func UnmarshalEmailBlock(data []byte) (EmailBlock, error) {
 		children[i] = child
 	}
 
-	// Merge with defaults
-	mergedAttrs := mergeAttributesWithDefaults(blockJSON.Type, blockJSON.Attributes)
+	// Preserve stored attributes as-is (no defaults injected during deserialization)
+	attrs := blockJSON.Attributes
+	if attrs == nil {
+		attrs = make(map[string]interface{})
+	}
 
 	// Create base block
 	base := &BaseBlock{
 		ID:         blockJSON.ID,
 		Type:       blockJSON.Type,
 		Children:   children,
-		Attributes: mergedAttrs,
+		Attributes: attrs,
 		Content:    blockJSON.Content,
 	}
 
 	// Return typed wrapper based on component type
 	return createTypedBlock(base), nil
-}
-
-// mergeAttributesWithDefaults merges default attributes with provided attributes
-func mergeAttributesWithDefaults(componentType MJMLComponentType, attrs map[string]interface{}) map[string]interface{} {
-	defaults := GetDefaultAttributes(componentType)
-	if attrs == nil {
-		return defaults
-	}
-	merged := make(map[string]interface{})
-	// Copy defaults first
-	for k, v := range defaults {
-		merged[k] = v
-	}
-	// Override with provided attributes
-	for k, v := range attrs {
-		merged[k] = v
-	}
-	return merged
 }
 
 // createTypedBlock creates a typed block wrapper for a BaseBlock
@@ -631,8 +623,14 @@ func createTypedBlock(base *BaseBlock) EmailBlock {
 		return &MJSocialElementBlock{BaseBlock: base}
 	case MJMLComponentMjRaw:
 		return &MJRawBlock{BaseBlock: base}
+	case MJMLComponentMjLiquid:
+		return &MJLiquidBlock{BaseBlock: base}
 	case MJMLComponentMjAttributes:
 		return &MJAttributesBlock{BaseBlock: base}
+	case MJMLComponentMjAll:
+		return &MJAttributeElementBlock{BaseBlock: base}
+	case MJMLComponentMjClass:
+		return &MJAttributeElementBlock{BaseBlock: base}
 	case MJMLComponentMjBreakpoint:
 		return &MJBreakpointBlock{BaseBlock: base}
 	case MJMLComponentMjFont:
@@ -680,15 +678,18 @@ var ValidChildrenMap = map[MJMLComponentType][]MJMLComponentType{
 		MJMLComponentMjWrapper,
 		MJMLComponentMjSection,
 		MJMLComponentMjRaw,
+		MJMLComponentMjLiquid,
 	},
 	MJMLComponentMjWrapper: {
 		MJMLComponentMjSection,
 		MJMLComponentMjRaw,
+		MJMLComponentMjLiquid,
 	},
 	MJMLComponentMjSection: {
 		MJMLComponentMjColumn,
 		MJMLComponentMjGroup,
 		MJMLComponentMjRaw,
+		MJMLComponentMjLiquid,
 	},
 	MJMLComponentMjColumn: {
 		MJMLComponentMjText,
@@ -698,6 +699,7 @@ var ValidChildrenMap = map[MJMLComponentType][]MJMLComponentType{
 		MJMLComponentMjSpacer,
 		MJMLComponentMjSocial,
 		MJMLComponentMjRaw,
+		MJMLComponentMjLiquid,
 	},
 	MJMLComponentMjGroup: {
 		MJMLComponentMjColumn,
@@ -723,7 +725,16 @@ var ValidChildrenMap = map[MJMLComponentType][]MJMLComponentType{
 	MJMLComponentMjSpacer:         {},
 	MJMLComponentMjSocialElement:  {},
 	MJMLComponentMjRaw:            {},
-	MJMLComponentMjAttributes:     {},
+	MJMLComponentMjLiquid:         {},
+	MJMLComponentMjAttributes: {
+		MJMLComponentMjAll, MJMLComponentMjClass,
+		MJMLComponentMjText, MJMLComponentMjButton, MJMLComponentMjImage,
+		MJMLComponentMjSection, MJMLComponentMjColumn, MJMLComponentMjWrapper,
+		MJMLComponentMjBody, MJMLComponentMjDivider, MJMLComponentMjSpacer,
+		MJMLComponentMjSocial, MJMLComponentMjSocialElement, MJMLComponentMjGroup,
+	},
+	MJMLComponentMjAll:            {},
+	MJMLComponentMjClass:          {},
 	MJMLComponentMjBreakpoint:     {},
 	MJMLComponentMjFont:           {},
 	MJMLComponentMjHtmlAttributes: {},
@@ -830,6 +841,8 @@ func GetComponentDisplayName(componentType MJMLComponentType) string {
 		return "Title"
 	case MJMLComponentMjRaw:
 		return "Raw HTML"
+	case MJMLComponentMjLiquid:
+		return "Liquid"
 	default:
 		// Convert kebab-case to Title Case
 		parts := strings.Split(string(componentType), "-")
@@ -849,7 +862,7 @@ func GetComponentCategory(componentType MJMLComponentType) string {
 		return "Document"
 	case MJMLComponentMjWrapper, MJMLComponentMjSection, MJMLComponentMjColumn, MJMLComponentMjGroup:
 		return "Layout"
-	case MJMLComponentMjText, MJMLComponentMjButton, MJMLComponentMjImage:
+	case MJMLComponentMjText, MJMLComponentMjButton, MJMLComponentMjImage, MJMLComponentMjLiquid:
 		return "Content"
 	case MJMLComponentMjDivider, MJMLComponentMjSpacer:
 		return "Spacing"
@@ -876,6 +889,7 @@ func IsContentComponent(componentType MJMLComponentType) bool {
 		MJMLComponentMjSocial,
 		MJMLComponentMjSocialElement,
 		MJMLComponentMjRaw,
+		MJMLComponentMjLiquid,
 	}
 
 	for _, contentType := range contentTypes {

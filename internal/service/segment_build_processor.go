@@ -79,17 +79,28 @@ func (p *SegmentBuildProcessor) Process(ctx context.Context, task *domain.Task, 
 		return false, fmt.Errorf("failed to fetch segment: %w", err)
 	}
 
+	// Store the version we're building
+	if state.Version == 0 {
+		state.Version = segment.Version
+	}
+
+	// Check if this task is already outdated before touching the segment status
+	if segment.Version > state.Version {
+		p.logger.WithFields(map[string]interface{}{
+			"task_version":    state.Version,
+			"current_version": segment.Version,
+			"segment_id":     state.SegmentID,
+		}).Info("Segment was updated before task started, aborting outdated task")
+
+		return true, nil
+	}
+
 	// Update segment status to "building" if not already
 	if segment.Status != string(domain.SegmentStatusBuilding) {
 		segment.Status = string(domain.SegmentStatusBuilding)
 		if err := p.segmentRepo.UpdateSegment(ctx, task.WorkspaceID, segment); err != nil {
 			return false, fmt.Errorf("failed to update segment status: %w", err)
 		}
-	}
-
-	// Store the version we're building
-	if state.Version == 0 {
-		state.Version = segment.Version
 	}
 
 	// Use the pre-generated SQL and args stored in the segment

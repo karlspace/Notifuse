@@ -746,7 +746,7 @@ const BroadcastCard: React.FC<BroadcastCardProps> = ({
                               return (
                                 <Tooltip title={t`0 opens out of 0 recipients`}>
                                   <>
-                                    <FontAwesomeIcon icon={faEye} style={{ opacity: 0.7 }} />
+                                    <FontAwesomeIcon icon={faEye} style={{ opacity: 0.7 }} className="text-purple-500" />
                                     <span className="cursor-help ml-1">{t`N/A`}</span>
                                   </>
                                 </Tooltip>
@@ -758,7 +758,7 @@ const BroadcastCard: React.FC<BroadcastCardProps> = ({
                             return (
                               <Tooltip title={t`${opens} opens out of ${recipients} recipients`}>
                                 <>
-                                  <FontAwesomeIcon icon={faEye} style={{ opacity: 0.7 }} />{' '}
+                                  <FontAwesomeIcon icon={faEye} style={{ opacity: 0.7 }} className="text-purple-500" />{' '}
                                   <span className="cursor-help ml-1">
                                     {(openRate * 100).toFixed(1)}%
                                   </span>
@@ -780,6 +780,7 @@ const BroadcastCard: React.FC<BroadcastCardProps> = ({
                                     <FontAwesomeIcon
                                       icon={faArrowPointer}
                                       style={{ opacity: 0.7 }}
+                                      className="text-cyan-500"
                                     />{' '}
                                     <span className="cursor-help ml-1">{t`N/A`}</span>
                                   </>
@@ -792,7 +793,7 @@ const BroadcastCard: React.FC<BroadcastCardProps> = ({
                             return (
                               <Tooltip title={t`${clicks} clicks out of ${recipients} recipients`}>
                                 <>
-                                  <FontAwesomeIcon icon={faArrowPointer} style={{ opacity: 0.7 }} />{' '}
+                                  <FontAwesomeIcon icon={faArrowPointer} style={{ opacity: 0.7 }} className="text-cyan-500" />{' '}
                                   <span className="cursor-help ml-1">
                                     {(clickRate * 100).toFixed(1)}%
                                   </span>

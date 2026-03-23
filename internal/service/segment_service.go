@@ -117,11 +117,12 @@ func (s *SegmentService) CreateSegment(ctx context.Context, req *domain.CreateSe
 			"segment_id": segment.ID,
 		}).Warn("Failed to create build task for segment (non-fatal)")
 	} else {
-		// Immediately trigger task execution after segment creation
+		// Immediately trigger execution of the specific build task
 		go func() {
 			// Small delay to ensure transaction is committed
 			time.Sleep(100 * time.Millisecond)
-			if execErr := s.taskService.ExecutePendingTasks(context.Background(), 1); execErr != nil {
+			timeoutAt := time.Now().Add(time.Duration(task.MaxRuntime) * time.Second)
+			if execErr := s.taskService.ExecuteTask(context.Background(), workspaceID, task.ID, timeoutAt); execErr != nil {
 				s.logger.WithFields(map[string]interface{}{
 					"segment_id": segment.ID,
 					"task_id":    task.ID,
@@ -288,11 +289,12 @@ func (s *SegmentService) UpdateSegment(ctx context.Context, req *domain.UpdateSe
 				"segment_id": existing.ID,
 			}).Warn("Failed to create rebuild task for segment (non-fatal)")
 		} else {
-			// Immediately trigger task execution after segment update
+			// Immediately trigger execution of the specific build task
 			go func() {
 				// Small delay to ensure transaction is committed
 				time.Sleep(100 * time.Millisecond)
-				if execErr := s.taskService.ExecutePendingTasks(context.Background(), 1); execErr != nil {
+				timeoutAt := time.Now().Add(time.Duration(task.MaxRuntime) * time.Second)
+				if execErr := s.taskService.ExecuteTask(context.Background(), workspaceID, task.ID, timeoutAt); execErr != nil {
 					s.logger.WithFields(map[string]interface{}{
 						"segment_id": existing.ID,
 						"task_id":    task.ID,
@@ -380,11 +382,12 @@ func (s *SegmentService) RebuildSegment(ctx context.Context, workspaceID, segmen
 		return fmt.Errorf("failed to create rebuild task: %w", err)
 	}
 
-	// Immediately trigger task execution after segment rebuild
+	// Immediately trigger execution of the specific build task
 	go func() {
 		// Small delay to ensure transaction is committed
 		time.Sleep(100 * time.Millisecond)
-		if execErr := s.taskService.ExecutePendingTasks(context.Background(), 1); execErr != nil {
+		timeoutAt := time.Now().Add(time.Duration(task.MaxRuntime) * time.Second)
+		if execErr := s.taskService.ExecuteTask(context.Background(), workspaceID, task.ID, timeoutAt); execErr != nil {
 			s.logger.WithFields(map[string]interface{}{
 				"segment_id": segmentID,
 				"task_id":    task.ID,
@@ -516,7 +519,8 @@ func calculateNext5AMInTimezone(tz string) (time.Time, error) {
 
 	// If we've already passed 5 AM today, move to tomorrow
 	if now.After(next5AM) || now.Equal(next5AM) {
-		next5AM = next5AM.Add(24 * time.Hour)
+		tomorrow := now.AddDate(0, 0, 1)
+		next5AM = time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), 5, 0, 0, 0, loc)
 	}
 
 	// Convert to UTC for storage

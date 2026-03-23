@@ -721,6 +721,7 @@ const DrawerSegment = (props: {
             <TreeNodeInput
               schemas={schemas}
               lists={lists}
+              workspaceId={workspaceId}
               customFieldLabels={workspace?.settings?.custom_field_labels}
             />
           </Form.Item>

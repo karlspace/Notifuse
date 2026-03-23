@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [28.3] - 2026-03-20
+
+- **Security**: Upgraded google.golang.org/grpc to v1.79.3
+- **Security**: Upgraded fast-xml-parser to v5.5.8
+
+## [28.2] - 2026-03-17
+
+- **Postmark**: Added configurable Message Stream support, allowing Postmark to be used for both transactional (`outbound`) and broadcast/marketing emails (#289)
+- **Broadcasts**: Fixed MJML code mode templates failing with "template missing content" error when sending broadcasts
+- **Contacts**: Fixed `/api/contacts.list` rejecting partial email searches with "invalid email format" error. The `email` filter now accepts partial strings for substring matching as intended (#292)
+
+## [28.1] - 2026-03-09
+
+- **Transactional Emails**: Added `subject_preview` override to `email_options`, allowing dynamic email preheader text per API call with Liquid templating support
+- **Templates**: Added language selection to "Send Test Email" modal and "Preview Template" drawer, allowing users to preview and test translated email variants
+- **Demo**: Demo workspace now includes French and Spanish translations for all 4 email templates, showcasing the multi-language feature
+- **Templates**: Downloaded template files now use the template's name as filename instead of a generic name (#286)
+- **Email Builder**: Added `mj-liquid` block type for embedding raw MJML+Liquid code in the visual editor, enabling dynamic structural content like for-loops generating columns or conditional sections
+- **Security**: Upgraded liquidjs to 10.25.0
+
+## [28.0] - 2026-03-05
+
+- **Templates**: Added option to choose between visual email builder or MJML code editor when creating templates
+- **Templates**: Added ability to translate email templates to languages configured in workspace settings
+- **Contacts**: Fixed invalid "Blacklisted" status option in change status dropdown, replaced with valid "Bounced" and "Complained" statuses (#285)
+- **SMTP**: Added configurable EHLO hostname for SMTP connections. Some SMTP servers reject `EHLO localhost`; users can now set a custom hostname (e.g., their domain) via the `SMTP_EHLO_HOSTNAME` env var, setup wizard, or workspace integration settings. Defaults to the SMTP host value when empty.
+- **Transactional Notifications**: Fixed delivery stats (sent, delivered, failed, bounced) always showing 0 by linking messages to their originating notification via a new `transactional_notification_id` column
+- **Email Builder**: Fixed `<mj-attributes>` global styles not applying in preview and sent emails (#282)
+
+## [27.4] - 2026-03-01
+
+- **Notification Center**: Fixed browser language auto-save overwriting contact's manually chosen language. Now only auto-detects when contact has no language set.
+- **Email Builder**: Fixed missing MJML component defaults (border-radius, borders, background, direction, textAlign) causing styles not to render in the WYSIWYG editor
+- **Transactional Emails**: Added `subject` override to `email_options`, allowing dynamic email subject lines per API call with Liquid templating support (#281)
+
+## [27.3] - 2026-02-28
+
+- **Segments**: Added template filter to email activity conditions, allowing segments like "opened template X at least 3 times"
+- **SMTP**: Fixed TLS override option not working for system emails (magic codes, invitations, alerts). The "Use TLS" toggle was ignored, causing certificate errors on local SMTP relays (#275)
+- **Automations**: Fixed automation emails rendering `{{ notification_center_url }}` and `{{ unsubscribe_url }}` as empty strings by using the shared template data builder (#279)
+- **Segments**: Fixed race condition where background task execution could pick up unrelated tasks, causing flaky segment recompute behavior
+- **Security**: Upgraded rollup to 4.59.0 and minimatch to 10.2.4
+
 ## [27.2] - 2026-02-21
 
 - **Contacts**: Fixed panic (502) when calling `/api/contacts.list` without the `limit` parameter (#264)

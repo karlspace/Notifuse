@@ -73,7 +73,7 @@
     "highlight.js": "^11.10.0",
     "html2canvas": "^1.4.1",
     "is-hotkey": "^0.2.0",
-    "liquidjs": "^10.24.0",
+    "liquidjs": "^10.25.0",
     "lodash": "^4.17.23",
     "lodash.throttle": "^4.1.1",
     "lowlight": "^3.3.0",
@@ -107,8 +107,11 @@
   "overrides": {
     "seroval": "^1.4.1",
     "seroval-plugins": "^1.4.1",
-    "fast-xml-parser": "5.3.6",
-    "markdown-it": ">=14.1.1"
+    "fast-xml-parser": ">=5.5.7",
+    "markdown-it": ">=14.1.1",
+    "minimatch": ">=10.2.3",
+    "yaml": "^2.4.2",
+    "flatted": ">=3.4.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",

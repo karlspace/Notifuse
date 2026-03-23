@@ -147,6 +147,7 @@ type EmailNodeExecutor struct {
 	emailQueueRepo domain.EmailQueueRepository
 	templateRepo   domain.TemplateRepository
 	workspaceRepo  domain.WorkspaceRepository
+	listRepo       domain.ListRepository
 	apiEndpoint    string
 	logger         logger.Logger
 }
@@ -156,6 +157,7 @@ func NewEmailNodeExecutor(
 	emailQueueRepo domain.EmailQueueRepository,
 	templateRepo domain.TemplateRepository,
 	workspaceRepo domain.WorkspaceRepository,
+	listRepo domain.ListRepository,
 	apiEndpoint string,
 	log logger.Logger,
 ) *EmailNodeExecutor {
@@ -163,6 +165,7 @@ func NewEmailNodeExecutor(
 		emailQueueRepo: emailQueueRepo,
 		templateRepo:   templateRepo,
 		workspaceRepo:  workspaceRepo,
+		listRepo:       listRepo,
 		apiEndpoint:    apiEndpoint,
 		logger:         log,
 	}
@@ -226,13 +229,10 @@ func (e *EmailNodeExecutor) Execute(ctx context.Context, params NodeExecutionPar
 		return nil, fmt.Errorf("failed to get template: %w", err)
 	}
 
-	// 5. Build template data from contact + automation
-	templateData := buildAutomationTemplateData(params.ContactData, params.Automation)
-
-	// 6. Generate message ID
+	// 5. Generate message ID
 	messageID := fmt.Sprintf("%s_%s", params.WorkspaceID, uuid.New().String())
 
-	// 7. Setup tracking settings
+	// 6. Setup tracking settings
 	endpoint := e.apiEndpoint
 	if workspace.Settings.CustomEndpointURL != nil && *workspace.Settings.CustomEndpointURL != "" {
 		endpoint = *workspace.Settings.CustomEndpointURL
@@ -249,16 +249,49 @@ func (e *EmailNodeExecutor) Execute(ctx context.Context, params NodeExecutionPar
 		MessageID:      messageID,
 	}
 
-	// 8. Compile template
-	compiledTemplate, err := notifuse_mjml.CompileTemplate(
-		notifuse_mjml.CompileTemplateRequest{
-			WorkspaceID:      params.WorkspaceID,
-			MessageID:        messageID,
-			VisualEditorTree: template.Email.VisualEditorTree,
-			TemplateData:     templateData,
-			TrackingSettings: trackingSettings,
+	// 7. Build template data using shared domain.BuildTemplateData
+	var listID, listName string
+	if params.Automation.ListID != "" {
+		list, err := e.listRepo.GetListByID(ctx, params.WorkspaceID, params.Automation.ListID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get list: %w", err)
+		}
+		listID = list.ID
+		listName = list.Name
+	}
+
+	templateData, err := domain.BuildTemplateData(domain.TemplateDataRequest{
+		WorkspaceID:        params.WorkspaceID,
+		WorkspaceSecretKey: workspace.Settings.SecretKey,
+		ContactWithList:    domain.ContactWithList{Contact: params.ContactData, ListID: listID, ListName: listName},
+		MessageID:          messageID,
+		TrackingSettings:   trackingSettings,
+		ProvidedData: domain.MapOfAny{
+			"automation_id":   params.Automation.ID,
+			"automation_name": params.Automation.Name,
 		},
-	)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to build template data: %w", err)
+	}
+
+	// 8. Resolve language variant based on contact's language
+	contactLang := ""
+	if params.ContactData.Language != nil && !params.ContactData.Language.IsNull {
+		contactLang = params.ContactData.Language.String
+	}
+	emailContent := template.ResolveEmailContent(contactLang, workspace.Settings.DefaultLanguage)
+
+	// 9. Compile template
+	compileReq := notifuse_mjml.CompileTemplateRequest{
+		WorkspaceID:      params.WorkspaceID,
+		MessageID:        messageID,
+		VisualEditorTree: emailContent.VisualEditorTree,
+		TemplateData:     notifuse_mjml.MapOfAny(templateData),
+		TrackingSettings: trackingSettings,
+	}
+	compileReq.MjmlSource = emailContent.GetCodeModeMjmlSource()
+	compiledTemplate, err := notifuse_mjml.CompileTemplate(compileReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile template: %w", err)
 	}
@@ -271,9 +304,9 @@ func (e *EmailNodeExecutor) Execute(ctx context.Context, params NodeExecutionPar
 	}
 	htmlContent := *compiledTemplate.HTML
 
-	// 9. Process subject line through Liquid templating
+	// 10. Process subject line through Liquid templating
 	subject, err := notifuse_mjml.ProcessLiquidTemplate(
-		template.Email.Subject,
+		emailContent.Subject,
 		templateData,
 		"email_subject",
 	)
@@ -281,13 +314,13 @@ func (e *EmailNodeExecutor) Execute(ctx context.Context, params NodeExecutionPar
 		return nil, fmt.Errorf("failed to process subject: %w", err)
 	}
 
-	// 10. Get sender
-	sender := emailProvider.GetSender(template.Email.SenderID)
+	// 11. Get sender
+	sender := emailProvider.GetSender(emailContent.SenderID)
 	if sender == nil {
 		return nil, fmt.Errorf("no sender configured for email provider")
 	}
 
-	// 11. Create queue entry
+	// 12. Create queue entry
 	entry := &domain.EmailQueueEntry{
 		ID:            uuid.New().String(),
 		Status:        domain.EmailQueueStatusPending,
@@ -306,7 +339,7 @@ func (e *EmailNodeExecutor) Execute(ctx context.Context, params NodeExecutionPar
 			HTMLContent:        htmlContent,
 			RateLimitPerMinute: emailProvider.RateLimitPerMinute,
 			EmailOptions: domain.EmailOptions{
-				ReplyTo: template.Email.ReplyTo,
+				ReplyTo: emailContent.ReplyTo,
 			},
 		},
 		MaxAttempts: 3,
@@ -314,7 +347,12 @@ func (e *EmailNodeExecutor) Execute(ctx context.Context, params NodeExecutionPar
 		UpdatedAt:   time.Now().UTC(),
 	}
 
-	// 12. Enqueue the email
+	// 13. Add List-Unsubscribe header for RFC-8058 compliance
+	if url, ok := templateData["oneclick_unsubscribe_url"].(string); ok && url != "" {
+		entry.Payload.EmailOptions.ListUnsubscribeURL = url
+	}
+
+	// 14. Enqueue the email
 	if err := e.emailQueueRepo.Enqueue(ctx, params.WorkspaceID, []*domain.EmailQueueEntry{entry}); err != nil {
 		return nil, fmt.Errorf("failed to enqueue email: %w", err)
 	}
@@ -356,47 +394,6 @@ func parseEmailNodeConfig(config map[string]interface{}) (*domain.EmailNodeConfi
 	}
 
 	return &c, nil
-}
-
-// buildAutomationTemplateData creates template data for automation emails
-func buildAutomationTemplateData(contact *domain.Contact, automation *domain.Automation) map[string]interface{} {
-	data := make(map[string]interface{})
-
-	if contact != nil {
-		// Add contact fields
-		data["email"] = contact.Email
-
-		// Convert contact to map for proper liquid template rendering
-		// This ensures NullableString fields are converted to plain strings
-		contactData, err := contact.ToMapOfAny()
-		if err != nil {
-			// Fallback to empty map if conversion fails
-			contactData = domain.MapOfAny{}
-		}
-		data["contact"] = contactData
-
-		// Add standard contact fields if they exist (for backward compatibility)
-		if contact.FirstName != nil && !contact.FirstName.IsNull {
-			data["first_name"] = contact.FirstName.String
-		}
-		if contact.LastName != nil && !contact.LastName.IsNull {
-			data["last_name"] = contact.LastName.String
-		}
-		if contact.FullName != nil && !contact.FullName.IsNull {
-			data["full_name"] = contact.FullName.String
-		}
-		if contact.Country != nil && !contact.Country.IsNull {
-			data["country"] = contact.Country.String
-		}
-	}
-
-	if automation != nil {
-		// Add automation context
-		data["automation_id"] = automation.ID
-		data["automation_name"] = automation.Name
-	}
-
-	return data
 }
 
 // BranchNodeExecutor executes branch nodes using database queries

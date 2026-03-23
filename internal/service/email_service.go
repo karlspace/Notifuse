@@ -266,27 +266,35 @@ func (s *EmailService) SendEmailForTemplate(ctx context.Context, request domain.
 		return fmt.Errorf("failed to get template: %w", err)
 	}
 
+	// Resolve language variant based on contact's language
+	contactLang := ""
+	if request.Contact != nil && request.Contact.Language != nil && !request.Contact.Language.IsNull {
+		contactLang = request.Contact.Language.String
+	}
+
+	// Get workspace to check for custom endpoint URL and default language
+	workspace, err := s.workspaceRepo.GetByID(ctx, request.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get workspace: %w", err)
+	}
+
+	emailContent := template.ResolveEmailContent(contactLang, workspace.Settings.DefaultLanguage)
+
 	// Find the emailSender
-	emailSender := request.EmailProvider.GetSender(template.Email.SenderID)
+	emailSender := request.EmailProvider.GetSender(emailContent.SenderID)
 
 	if emailSender == nil {
-		return fmt.Errorf("sender not found: %s", template.Email.SenderID)
+		return fmt.Errorf("sender not found: %s", emailContent.SenderID)
 	}
 
 	span.AddAttributes(
-		trace.StringAttribute("template.subject", template.Email.Subject),
+		trace.StringAttribute("template.subject", emailContent.Subject),
 		trace.StringAttribute("template.from_email", emailSender.Email),
 	)
 
 	// set utm_content to the template id if not set
 	if request.TrackingSettings.UTMContent == "" {
 		request.TrackingSettings.UTMContent = template.ID
-	}
-
-	// Get workspace to check for custom endpoint URL
-	workspace, err := s.workspaceRepo.GetByID(ctx, request.WorkspaceID)
-	if err != nil {
-		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
 	// Use workspace CustomEndpointURL if provided, otherwise use the default API endpoint
@@ -308,12 +316,14 @@ func (s *EmailService) SendEmailForTemplate(ctx context.Context, request domain.
 	}
 
 	compileTemplateRequest := domain.CompileTemplateRequest{
-		WorkspaceID:      request.WorkspaceID,
-		MessageID:        request.MessageID,
-		VisualEditorTree: template.Email.VisualEditorTree,
-		TemplateData:     request.MessageData.Data,
-		TrackingSettings: trackingSettings,
+		WorkspaceID:            request.WorkspaceID,
+		MessageID:              request.MessageID,
+		VisualEditorTree:       emailContent.VisualEditorTree,
+		TemplateData:           request.MessageData.Data,
+		TrackingSettings:       trackingSettings,
+		SubjectPreviewOverride: request.EmailOptions.SubjectPreview,
 	}
+	compileTemplateRequest.MjmlSource = emailContent.GetCodeModeMjmlSource()
 
 	// Compile the template with the message data (use system context to bypass authentication)
 	compiledTemplate, err := s.templateService.CompileTemplate(systemCtx, compileTemplateRequest)
@@ -357,7 +367,7 @@ func (s *EmailService) SendEmailForTemplate(ctx context.Context, request domain.
 
 	// Process subject line through Liquid templating if it contains Liquid tags
 	subject, err := notifuse_mjml.ProcessLiquidTemplate(
-		template.Email.Subject,
+		emailContent.Subject,
 		request.MessageData.Data,
 		"email_subject",
 	)
@@ -366,13 +376,39 @@ func (s *EmailService) SendEmailForTemplate(ctx context.Context, request domain.
 			"error":       err.Error(),
 			"message_id":  request.MessageID,
 			"template_id": request.TemplateConfig.TemplateID,
-			"subject":     template.Email.Subject,
+			"subject":     emailContent.Subject,
 		}).Error("Failed to process subject line with Liquid templating")
 		tracing.MarkSpanError(ctx, err)
 		return fmt.Errorf("failed to process subject with Liquid: %w", err)
 	}
 
+	// Allow override of subject via email options
+	if request.EmailOptions.Subject != nil && *request.EmailOptions.Subject != "" {
+		overrideSubject, err := notifuse_mjml.ProcessLiquidTemplate(
+			*request.EmailOptions.Subject,
+			request.MessageData.Data,
+			"email_subject_override",
+		)
+		if err != nil {
+			s.logger.WithFields(map[string]interface{}{
+				"error":       err.Error(),
+				"message_id":  request.MessageID,
+				"template_id": request.TemplateConfig.TemplateID,
+				"subject":     *request.EmailOptions.Subject,
+			}).Error("Failed to process subject override with Liquid templating")
+			tracing.MarkSpanError(ctx, err)
+			return fmt.Errorf("failed to process subject override with Liquid: %w", err)
+		}
+		s.logger.WithFields(map[string]interface{}{
+			"message_id":       request.MessageID,
+			"default_subject":  subject,
+			"override_subject": overrideSubject,
+		}).Debug("Using subject override")
+		subject = overrideSubject
+	}
+
 	htmlContent := *compiledTemplate.HTML
+
 	now := time.Now().UTC()
 
 	// Convert email options to channel options for storage
@@ -380,17 +416,18 @@ func (s *EmailService) SendEmailForTemplate(ctx context.Context, request domain.
 
 	// Create message history record
 	messageHistory := &domain.MessageHistory{
-		ID:             request.MessageID,
-		ExternalID:     request.ExternalID,
-		ContactEmail:   request.Contact.Email,
-		AutomationID:   request.AutomationID,
-		TemplateID:     request.TemplateConfig.TemplateID,
-		Channel:        "email",
-		MessageData:    request.MessageData,
-		ChannelOptions: channelOptions,
-		SentAt:         now,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:                          request.MessageID,
+		ExternalID:                  request.ExternalID,
+		ContactEmail:                request.Contact.Email,
+		AutomationID:                request.AutomationID,
+		TransactionalNotificationID: request.TransactionalNotificationID,
+		TemplateID:                  request.TemplateConfig.TemplateID,
+		Channel:                     "email",
+		MessageData:                 request.MessageData,
+		ChannelOptions:              channelOptions,
+		SentAt:                      now,
+		CreatedAt:                   now,
+		UpdatedAt:                   now,
 	}
 
 	// Save to message history
@@ -417,8 +454,8 @@ func (s *EmailService) SendEmailForTemplate(ctx context.Context, request domain.
 	tracing.AddAttribute(ctx, "email.sending", true)
 
 	// optional override for reply to
-	if template.Email.ReplyTo != "" {
-		request.EmailOptions.ReplyTo = template.Email.ReplyTo
+	if emailContent.ReplyTo != "" {
+		request.EmailOptions.ReplyTo = emailContent.ReplyTo
 	}
 
 	// Create SendEmailProviderRequest

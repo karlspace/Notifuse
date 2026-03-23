@@ -45,6 +45,7 @@ type ContactTimelineCondition struct {
 	Kind              string             `json:"kind"`           // Timeline event kind
 	CountOperator     string             `json:"count_operator"` // "at_least", "at_most", "exactly"
 	CountValue        int                `json:"count_value"`
+	TemplateID        *string            `json:"template_id,omitempty"`
 	TimeframeOperator *string            `json:"timeframe_operator,omitempty"` // "anytime", "in_date_range", "before_date", "after_date", "in_the_last_days"
 	TimeframeValues   []string           `json:"timeframe_values,omitempty"`
 	Filters           []*DimensionFilter `json:"filters,omitempty"`
@@ -196,6 +197,18 @@ func (c *ContactTimelineCondition) Validate() error {
 
 	if c.CountValue < 0 {
 		return fmt.Errorf("count_value must be non-negative")
+	}
+
+	// Validate template_id is only used with email event kinds or insert_message_history
+	if c.TemplateID != nil && *c.TemplateID != "" {
+		templateKinds := map[string]bool{
+			"open_email": true, "click_email": true,
+			"bounce_email": true, "complain_email": true,
+			"unsubscribe_email": true, "insert_message_history": true,
+		}
+		if !templateKinds[c.Kind] {
+			return fmt.Errorf("template_id can only be used with email event kinds (open_email, click_email, bounce_email, complain_email, unsubscribe_email) or insert_message_history")
+		}
 	}
 
 	if c.TimeframeOperator != nil {

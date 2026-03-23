@@ -4111,6 +4111,13 @@
                 "description": "Override default sender from name",
                 "example": "Support Team"
               },
+              "subject": {
+                "type": "string",
+                "nullable": true,
+                "description": "Override template subject line. Supports Liquid templating variables.",
+                "maxLength": 255,
+                "example": "Welcome, {{ name }}!"
+              },
               "cc": {
                 "type": "array",
                 "description": "CC email addresses",

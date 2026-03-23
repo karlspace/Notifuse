@@ -84,8 +84,8 @@ func TestSegmentService_CreateSegment(t *testing.T) {
 			},
 		)
 
-		// Expect ExecutePendingTasks to be called asynchronously after task creation
-		mockTaskService.EXPECT().ExecutePendingTasks(gomock.Any(), 1).Return(nil).AnyTimes()
+		// Expect ExecuteTask to be called asynchronously after task creation
+		mockTaskService.EXPECT().ExecuteTask(gomock.Any(), "workspace123", gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		segment, err := service.CreateSegment(ctx, req)
 		assert.NoError(t, err)
@@ -94,6 +94,9 @@ func TestSegmentService_CreateSegment(t *testing.T) {
 		assert.Equal(t, "Test Segment", segment.Name)
 		assert.NotZero(t, segment.DBCreatedAt)
 		assert.NotZero(t, segment.DBUpdatedAt)
+
+		// Wait for background goroutine to complete before mock cleanup
+		time.Sleep(200 * time.Millisecond)
 	})
 
 	t.Run("validation requires ID", func(t *testing.T) {
@@ -443,13 +446,16 @@ func TestSegmentService_UpdateSegment(t *testing.T) {
 
 		mockTaskService.EXPECT().CreateTask(gomock.Any(), "workspace123", gomock.Any()).Return(nil)
 
-		// Expect ExecutePendingTasks to be called asynchronously after task creation
-		mockTaskService.EXPECT().ExecutePendingTasks(gomock.Any(), 1).Return(nil).AnyTimes()
+		// Expect ExecuteTask to be called asynchronously after task creation
+		mockTaskService.EXPECT().ExecuteTask(gomock.Any(), "workspace123", gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		segment, err := service.UpdateSegment(ctx, req)
 		assert.NoError(t, err)
 		assert.NotNil(t, segment)
 		assert.Equal(t, "Updated Name", segment.Name)
+
+		// Wait for background goroutine to complete before mock cleanup
+		time.Sleep(200 * time.Millisecond)
 	})
 
 	t.Run("successful update with tree change", func(t *testing.T) {
@@ -503,14 +509,17 @@ func TestSegmentService_UpdateSegment(t *testing.T) {
 			},
 		)
 
-		// Expect ExecutePendingTasks to be called asynchronously after task creation
-		mockTaskService.EXPECT().ExecutePendingTasks(gomock.Any(), 1).Return(nil).AnyTimes()
+		// Expect ExecuteTask to be called asynchronously after task creation
+		mockTaskService.EXPECT().ExecuteTask(gomock.Any(), "workspace123", gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		segment, err := service.UpdateSegment(ctx, req)
 		assert.NoError(t, err)
 		assert.NotNil(t, segment)
 		assert.Equal(t, int64(2), segment.Version)
 		assert.Equal(t, string(domain.SegmentStatusBuilding), segment.Status)
+
+		// Wait for background goroutine to complete before mock cleanup
+		time.Sleep(200 * time.Millisecond)
 	})
 
 	t.Run("validation error", func(t *testing.T) {
@@ -723,11 +732,14 @@ func TestSegmentService_RebuildSegment(t *testing.T) {
 			},
 		)
 
-		// Expect ExecutePendingTasks to be called asynchronously after task creation
-		mockTaskService.EXPECT().ExecutePendingTasks(gomock.Any(), 1).Return(nil).AnyTimes()
+		// Expect ExecuteTask to be called asynchronously after task creation
+		mockTaskService.EXPECT().ExecuteTask(gomock.Any(), "workspace123", gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		err := service.RebuildSegment(ctx, "workspace123", "segment1")
 		assert.NoError(t, err)
+
+		// Wait for background goroutine to complete before mock cleanup
+		time.Sleep(200 * time.Millisecond)
 	})
 
 	t.Run("missing workspace ID", func(t *testing.T) {

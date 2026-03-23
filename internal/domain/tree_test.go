@@ -996,6 +996,76 @@ func TestContactTimelineCondition_Validate(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "valid with template_id and open_email kind",
+			cond: ContactTimelineCondition{
+				Kind:          "open_email",
+				CountOperator: "at_least",
+				CountValue:    1,
+				TemplateID:    stringPtr("template-123"),
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid with template_id and click_email kind",
+			cond: ContactTimelineCondition{
+				Kind:          "click_email",
+				CountOperator: "at_least",
+				CountValue:    1,
+				TemplateID:    stringPtr("template-456"),
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid with template_id and unsubscribe_email kind",
+			cond: ContactTimelineCondition{
+				Kind:          "unsubscribe_email",
+				CountOperator: "at_least",
+				CountValue:    1,
+				TemplateID:    stringPtr("template-789"),
+			},
+			wantErr: false,
+		},
+		{
+			name: "template_id with non-email kind",
+			cond: ContactTimelineCondition{
+				Kind:          "insert_contact",
+				CountOperator: "at_least",
+				CountValue:    1,
+				TemplateID:    stringPtr("template-123"),
+			},
+			wantErr: true,
+			errMsg:  "template_id can only be used with email event kinds (open_email, click_email, bounce_email, complain_email, unsubscribe_email) or insert_message_history",
+		},
+		{
+			name: "valid with template_id and insert_message_history kind",
+			cond: ContactTimelineCondition{
+				Kind:          "insert_message_history",
+				CountOperator: "at_least",
+				CountValue:    1,
+				TemplateID:    stringPtr("template-456"),
+			},
+			wantErr: false,
+		},
+		{
+			name: "nil template_id with non-email kind is valid",
+			cond: ContactTimelineCondition{
+				Kind:          "insert_contact",
+				CountOperator: "at_least",
+				CountValue:    1,
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty template_id string is valid (ignored)",
+			cond: ContactTimelineCondition{
+				Kind:          "insert_contact",
+				CountOperator: "at_least",
+				CountValue:    1,
+				TemplateID:    stringPtr(""),
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

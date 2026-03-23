@@ -1,5 +1,5 @@
 # Stage 1: Build the React frontend
-FROM node:20-alpine AS console-frontend-builder
+FROM node:22-alpine AS console-frontend-builder
 
 # Set working directory for the frontend
 WORKDIR /build/console
@@ -20,7 +20,7 @@ COPY console/ ./
 RUN npx lingui extract --clean && npm run build
 
 # Stage 2: Build the notification center frontend
-FROM node:20-alpine AS notification-center-builder
+FROM node:22-alpine AS notification-center-builder
 
 # Set working directory for the notification center
 WORKDIR /build/notification_center

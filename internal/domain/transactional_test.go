@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -752,6 +753,110 @@ func TestSendTransactionalRequest_Validate(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "replyTo 'not-an-email' must be a valid email address",
+		},
+		{
+			name: "valid request with subject override",
+			req: SendTransactionalRequest{
+				WorkspaceID: "workspace-123",
+				Notification: TransactionalNotificationSendParams{
+					ID: "notification-456",
+					Contact: &Contact{
+						Email: "contact@example.com",
+					},
+					Channels: []TransactionalChannel{TransactionalChannelEmail},
+					EmailOptions: EmailOptions{
+						Subject: stringPtr("Custom Subject"),
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "subject too long",
+			req: SendTransactionalRequest{
+				WorkspaceID: "workspace-123",
+				Notification: TransactionalNotificationSendParams{
+					ID: "notification-456",
+					Contact: &Contact{
+						Email: "contact@example.com",
+					},
+					Channels: []TransactionalChannel{TransactionalChannelEmail},
+					EmailOptions: EmailOptions{
+						Subject: stringPtr(strings.Repeat("a", 256)),
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "subject length must not exceed 255 characters",
+		},
+		{
+			name: "subject exactly 255 chars",
+			req: SendTransactionalRequest{
+				WorkspaceID: "workspace-123",
+				Notification: TransactionalNotificationSendParams{
+					ID: "notification-456",
+					Contact: &Contact{
+						Email: "contact@example.com",
+					},
+					Channels: []TransactionalChannel{TransactionalChannelEmail},
+					EmailOptions: EmailOptions{
+						Subject: stringPtr(strings.Repeat("a", 255)),
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "subject with Liquid tags is valid",
+			req: SendTransactionalRequest{
+				WorkspaceID: "workspace-123",
+				Notification: TransactionalNotificationSendParams{
+					ID: "notification-456",
+					Contact: &Contact{
+						Email: "contact@example.com",
+					},
+					Channels: []TransactionalChannel{TransactionalChannelEmail},
+					EmailOptions: EmailOptions{
+						Subject: stringPtr("Hello {{ name }}!"),
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "subject_preview too long",
+			req: SendTransactionalRequest{
+				WorkspaceID: "workspace-123",
+				Notification: TransactionalNotificationSendParams{
+					ID: "notification-456",
+					Contact: &Contact{
+						Email: "contact@example.com",
+					},
+					Channels: []TransactionalChannel{TransactionalChannelEmail},
+					EmailOptions: EmailOptions{
+						SubjectPreview: stringPtr(strings.Repeat("a", 256)),
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "subject_preview length must not exceed 255 characters",
+		},
+		{
+			name: "subject_preview exactly 255 chars",
+			req: SendTransactionalRequest{
+				WorkspaceID: "workspace-123",
+				Notification: TransactionalNotificationSendParams{
+					ID: "notification-456",
+					Contact: &Contact{
+						Email: "contact@example.com",
+					},
+					Channels: []TransactionalChannel{TransactionalChannelEmail},
+					EmailOptions: EmailOptions{
+						SubjectPreview: stringPtr(strings.Repeat("a", 255)),
+					},
+				},
+			},
+			wantErr: false,
 		},
 		{
 			name: "missing channels",

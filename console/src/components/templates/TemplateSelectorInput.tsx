@@ -25,6 +25,7 @@ interface TemplateSelectorInputProps {
   placeholder?: string
   clearable?: boolean
   disabled?: boolean
+  size?: 'small' | 'middle' | 'large'
 }
 
 const TemplateSelectorInput: React.FC<TemplateSelectorInputProps> = ({
@@ -34,7 +35,8 @@ const TemplateSelectorInput: React.FC<TemplateSelectorInputProps> = ({
   category,
   placeholder,
   clearable = true,
-  disabled = false
+  disabled = false,
+  size
 }) => {
   const { t } = useLingui()
   const defaultPlaceholder = placeholder || t`Select a template`
@@ -143,6 +145,7 @@ const TemplateSelectorInput: React.FC<TemplateSelectorInputProps> = ({
             onChange?.(null)
           }}
           allowClear={clearable}
+          size={size}
           style={{ flex: 1 }}
         />
         {selectedTemplate && currentWorkspace && (
