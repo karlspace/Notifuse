@@ -3,25 +3,33 @@ import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { useLingui } from '@lingui/react/macro'
 import { SettingsSectionHeader } from './SettingsSectionHeader'
 
-export function SMTPRelaySettings() {
+export function SMTPBridgeSettings() {
   const { t } = useLingui()
+
+  const mode = window.SMTP_BRIDGE_TLS_MODE
+  const modeLabel: Record<typeof mode, string> = {
+    off: t`Off (plaintext)`,
+    starttls: t`STARTTLS`,
+    implicit: t`Implicit TLS`,
+  }
+  const modeEnabled = mode === 'starttls' || mode === 'implicit'
 
   return (
     <>
       <SettingsSectionHeader
-        title={t`SMTP Relay`}
-        description={t`SMTP relay server for forwarding transactional emails`}
+        title={t`SMTP Bridge`}
+        description={t`SMTP bridge server for forwarding transactional emails`}
       />
 
-      {window.SMTP_RELAY_ENABLED ? (
+      {window.SMTP_BRIDGE_ENABLED ? (
         <>
           <div style={{ marginBottom: '16px' }}>
             <a
-              href="https://docs.notifuse.com/concepts/transactional-api#smtp-relay"
+              href="https://docs.notifuse.com/concepts/transactional-api#smtp-bridge"
               target="_blank"
               rel="noopener noreferrer"
             >
-              {t`View SMTP Relay documentation and setup guide`}
+              {t`View SMTP Bridge documentation and setup guide`}
             </a>
           </div>
           <Descriptions
@@ -31,23 +39,23 @@ export function SMTPRelaySettings() {
             styles={{ label: { width: '200px', fontWeight: '500' } }}
           >
             <Descriptions.Item label={t`SMTP domain`}>
-              {window.SMTP_RELAY_DOMAIN || t`Not set`}
+              {window.SMTP_BRIDGE_DOMAIN || t`Not set`}
             </Descriptions.Item>
 
             <Descriptions.Item label={t`SMTP port`}>
-              {window.SMTP_RELAY_PORT || t`Not set`}
+              {window.SMTP_BRIDGE_PORT || t`Not set`}
             </Descriptions.Item>
 
             <Descriptions.Item label={t`TLS`}>
-              {window.SMTP_RELAY_TLS_ENABLED ? (
+              {modeEnabled ? (
                 <span style={{ color: '#52c41a' }}>
                   <CheckCircleOutlined style={{ marginRight: '8px' }} />
-                  {t`Enabled`}
+                  {modeLabel[mode]}
                 </span>
               ) : (
                 <span style={{ color: '#ff4d4f' }}>
                   <CloseCircleOutlined style={{ marginRight: '8px' }} />
-                  {t`Disabled`}
+                  {modeLabel[mode]}
                 </span>
               )}
             </Descriptions.Item>
@@ -55,13 +63,13 @@ export function SMTPRelaySettings() {
         </>
       ) : (
         <div style={{ color: '#8c8c8c', fontStyle: 'italic' }}>
-          {t`SMTP relay is not configured.`}{' '}
+          {t`SMTP bridge is not configured.`}{' '}
           <a
-            href="https://docs.notifuse.com/installation#smtp-relay-configuration"
+            href="https://docs.notifuse.com/installation#smtp-bridge-configuration"
             target="_blank"
             rel="noopener noreferrer"
           >
-            {t`Learn how to enable SMTP relay`}
+            {t`Learn how to enable SMTP bridge`}
           </a>
         </div>
       )}

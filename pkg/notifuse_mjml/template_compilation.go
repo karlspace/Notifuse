@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Notifuse/notifuse/pkg/crypto"
 	"github.com/preslavrachev/gomjml/mjml"
 )
 
@@ -239,7 +240,7 @@ type CompileTemplateRequest struct {
 	MjmlSource              *string          `json:"mjml_source,omitempty"`
 	TemplateData            MapOfAny         `json:"test_data,omitempty"`
 	TrackingSettings        TrackingSettings `json:"tracking_settings,omitempty"`
-	Channel                 string           `json:"channel,omitempty"`                  // "email" or "web" - filters blocks by visibility
+	Channel                 string           `json:"channel,omitempty"`                  // "email" or "web"
 	PreserveLiquid          bool             `json:"preserve_liquid,omitempty"`           // When true, skip Liquid template processing and preserve raw syntax
 	SubjectPreviewOverride  *string          `json:"subject_preview_override,omitempty"`  // Override mj-preview content before compilation
 }
@@ -310,8 +311,17 @@ type CompileTemplateResponse struct {
 }
 
 // GenerateEmailRedirectionEndpoint generates the email redirection endpoint URL
+// Uses encrypted path tokens (/r/{token}) to avoid pixel blocker detection.
+// Falls back to legacy query params (/visit?mid=...) if encryption fails.
 func GenerateEmailRedirectionEndpoint(workspaceID string, messageID string, apiEndpoint string, destinationURL string, sentTimestamp int64) string {
-	// URL encode the parameters to handle special characters
+	// Try encrypted format: /r/{token}
+	plaintext := fmt.Sprintf("%s\n%s\n%d\n%s", messageID, workspaceID, sentTimestamp, destinationURL)
+	token, err := crypto.EncryptTrackingToken(plaintext)
+	if err == nil {
+		return fmt.Sprintf("%s/r/%s", apiEndpoint, token)
+	}
+
+	// Fallback to legacy query params
 	encodedMID := url.QueryEscape(messageID)
 	encodedWID := url.QueryEscape(workspaceID)
 	encodedURL := url.QueryEscape(destinationURL)
@@ -319,13 +329,24 @@ func GenerateEmailRedirectionEndpoint(workspaceID string, messageID string, apiE
 		apiEndpoint, encodedMID, encodedWID, sentTimestamp, encodedURL)
 }
 
+// GenerateHTMLOpenTrackingPixel generates the HTML for the open tracking pixel.
+// Uses encrypted path tokens (/t/{token}) to avoid pixel blocker detection.
+// Falls back to legacy query params (/opens?mid=...) if encryption fails.
 func GenerateHTMLOpenTrackingPixel(workspaceID string, messageID string, apiEndpoint string, sentTimestamp int64) string {
-	// URL encode the parameters to handle special characters
-	encodedMID := url.QueryEscape(messageID)
-	encodedWID := url.QueryEscape(workspaceID)
-	pixelURL := fmt.Sprintf("%s/opens?mid=%s&wid=%s&ts=%d",
-		apiEndpoint, encodedMID, encodedWID, sentTimestamp)
-	return fmt.Sprintf(`<img src="%s" alt="" width="1" height="1">`, pixelURL)
+	// Try encrypted format: /t/{token}
+	plaintext := fmt.Sprintf("%s\n%s\n%d", messageID, workspaceID, sentTimestamp)
+	token, err := crypto.EncryptTrackingToken(plaintext)
+	var pixelURL string
+	if err == nil {
+		pixelURL = fmt.Sprintf("%s/t/%s", apiEndpoint, token)
+	} else {
+		// Fallback to legacy query params
+		encodedMID := url.QueryEscape(messageID)
+		encodedWID := url.QueryEscape(workspaceID)
+		pixelURL = fmt.Sprintf("%s/opens?mid=%s&wid=%s&ts=%d",
+			apiEndpoint, encodedMID, encodedWID, sentTimestamp)
+	}
+	return fmt.Sprintf(`<table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%%"><tr><td><img src="%s" alt="" style="border:0;margin:0;padding:0;"></td></tr></table>`, pixelURL)
 }
 
 // CompileTemplate compiles a visual editor tree to MJML and HTML
@@ -359,11 +380,7 @@ func CompileTemplate(req CompileTemplateRequest) (resp *CompileTemplateResponse,
 	} else {
 		// Visual editor mode: convert JSON tree to MJML
 
-		// Apply channel filtering if specified
 		tree := req.VisualEditorTree
-		if req.Channel != "" {
-			tree = FilterBlocksByChannel(req.VisualEditorTree, req.Channel)
-		}
 
 		// Apply subject_preview override in the tree before conversion
 		if req.SubjectPreviewOverride != nil && *req.SubjectPreviewOverride != "" {
@@ -557,17 +574,16 @@ func TrackLinks(htmlString string, trackingSettings TrackingSettings) (updatedHT
 	})
 
 	if trackingSettings.EnableTracking {
-		// Insert tracking pixel at the end of the body tag
-		// Use current Unix timestamp (seconds) for bot detection
+		// Insert tracking pixel before </body>. The pixel is wrapped in a <table>
+		// by GenerateHTMLOpenTrackingPixel to look like a structural layout element
+		// rather than a standalone tracking pixel.
 		sentTimestamp := time.Now().Unix()
 		trackingPixel := GenerateHTMLOpenTrackingPixel(trackingSettings.WorkspaceID, trackingSettings.MessageID, trackingSettings.Endpoint, sentTimestamp)
 
-		// Find the closing </body> tag and insert the pixel before it
 		bodyCloseRegex := regexp.MustCompile(`(?i)(<\/body>)`)
 		if bodyCloseRegex.MatchString(updatedHTML) {
 			updatedHTML = bodyCloseRegex.ReplaceAllString(updatedHTML, trackingPixel+"$1")
 		} else {
-			// Fallback: if no closing body tag found, append to the end
 			updatedHTML = updatedHTML + trackingPixel
 		}
 	}
