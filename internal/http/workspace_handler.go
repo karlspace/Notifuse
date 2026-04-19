@@ -148,6 +148,11 @@ func (h *WorkspaceHandler) handleCreate(w http.ResponseWriter, r *http.Request) 
 		req.Settings.Languages,
 	)
 	if err != nil {
+		var limitErr *domain.ErrWorkspaceLimitReached
+		if errors.As(err, &limitErr) {
+			WriteJSONError(w, limitErr.Error(), http.StatusForbidden)
+			return
+		}
 		if err.Error() == "workspace already exists" {
 			WriteJSONError(w, "Workspace already exists", http.StatusConflict)
 		} else {
@@ -299,6 +304,11 @@ func (h *WorkspaceHandler) handleInviteMember(w http.ResponseWriter, r *http.Req
 	// Create the invitation or add the user directly if they already exist
 	invitation, token, err := h.workspaceService.InviteMember(r.Context(), req.WorkspaceID, req.Email, req.Permissions)
 	if err != nil {
+		var limitErr *domain.ErrTeamMemberLimitReached
+		if errors.As(err, &limitErr) {
+			WriteJSONError(w, limitErr.Error(), http.StatusForbidden)
+			return
+		}
 		h.logger.WithField("workspace_id", req.WorkspaceID).WithField("email", req.Email).WithField("error", err.Error()).Error("Failed to invite member")
 		WriteJSONError(w, "Failed to invite member", http.StatusInternalServerError)
 		return
@@ -676,6 +686,11 @@ func (h *WorkspaceHandler) handleAcceptInvitation(w http.ResponseWriter, r *http
 	// Process the invitation acceptance
 	authResponse, err := h.workspaceService.AcceptInvitation(r.Context(), invitationID, workspaceID, email)
 	if err != nil {
+		var limitErr *domain.ErrTeamMemberLimitReached
+		if errors.As(err, &limitErr) {
+			WriteJSONError(w, limitErr.Error(), http.StatusForbidden)
+			return
+		}
 		h.logger.WithField("invitation_id", invitationID).WithField("workspace_id", workspaceID).WithField("email", email).WithField("error", err.Error()).Error("Failed to accept invitation")
 		WriteJSONError(w, "Failed to accept invitation", http.StatusInternalServerError)
 		return

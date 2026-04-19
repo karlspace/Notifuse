@@ -280,6 +280,8 @@ type BlogSettings struct {
 	SEO              *SEOSettings `json:"seo,omitempty"`
 	HomePageSize     int          `json:"home_page_size,omitempty"`     // Posts per page on home (default: 20)
 	CategoryPageSize int          `json:"category_page_size,omitempty"` // Posts per page on category (default: 20)
+	FeedSummaryOnly  bool         `json:"feed_summary_only,omitempty"`  // When true, RSS/JSON feeds emit excerpt instead of full HTML
+	FeedMaxItems     int          `json:"feed_max_items,omitempty"`     // Items per RSS/JSON feed (default and cap: 20)
 }
 
 // GetHomePageSize returns the home page size with validation and default
@@ -296,6 +298,14 @@ func (bs *BlogSettings) GetCategoryPageSize() int {
 		return 20 // default
 	}
 	return bs.CategoryPageSize
+}
+
+// GetFeedMaxItems returns the feed item cap, clamped to [1, 20].
+func (bs *BlogSettings) GetFeedMaxItems() int {
+	if bs == nil || bs.FeedMaxItems < 1 || bs.FeedMaxItems > 20 {
+		return 20
+	}
+	return bs.FeedMaxItems
 }
 
 // Value implements the driver.Valuer interface for database serialization
@@ -930,6 +940,8 @@ type WorkspaceRepository interface {
 	GetWorkspaceInvitations(ctx context.Context, workspaceID string) ([]*WorkspaceInvitation, error)
 	DeleteInvitation(ctx context.Context, id string) error
 	IsUserWorkspaceMember(ctx context.Context, userID, workspaceID string) (bool, error)
+	CountWorkspaceMembersAndInvitations(ctx context.Context, workspaceID string) (int, error)
+	CountWorkspaces(ctx context.Context) (int, error)
 
 	// Database management
 	GetConnection(ctx context.Context, workspaceID string) (*sql.DB, error)
@@ -957,6 +969,26 @@ type ErrWorkspaceNotFound struct {
 
 func (e *ErrWorkspaceNotFound) Error() string {
 	return fmt.Sprintf("workspace not found: %s", e.WorkspaceID)
+}
+
+// ErrTeamMemberLimitReached is returned when a workspace has reached its team member limit
+type ErrTeamMemberLimitReached struct {
+	Limit   int
+	Current int
+}
+
+func (e *ErrTeamMemberLimitReached) Error() string {
+	return fmt.Sprintf("team member limit reached: workspace has %d members and invitations (limit: %d)", e.Current, e.Limit)
+}
+
+// ErrWorkspaceLimitReached is returned when the system has reached its workspace limit
+type ErrWorkspaceLimitReached struct {
+	Limit   int
+	Current int
+}
+
+func (e *ErrWorkspaceLimitReached) Error() string {
+	return fmt.Sprintf("workspace limit reached: %d workspaces exist (limit: %d)", e.Current, e.Limit)
 }
 
 // WorkspaceServiceInterface defines the interface for workspace operations

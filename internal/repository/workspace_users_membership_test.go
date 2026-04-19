@@ -69,3 +69,113 @@ func TestWorkspaceRepository_IsUserWorkspaceMember(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func TestWorkspaceRepository_CountWorkspaceMembersAndInvitations(t *testing.T) {
+	db, mock, cleanup := testutil.SetupMockDB(t)
+	defer cleanup()
+
+	dbConfig := &config.DatabaseConfig{
+		Prefix: "notifuse",
+	}
+
+	connMgr := newMockConnectionManager(db)
+	repo := NewWorkspaceRepository(db, dbConfig, "secret-key", connMgr)
+	workspaceID := "ws-123"
+
+	t.Run("returns correct count", func(t *testing.T) {
+		rows := sqlmock.NewRows([]string{"count"}).AddRow(5)
+
+		mock.ExpectQuery(`SELECT`).
+			WithArgs(workspaceID).
+			WillReturnRows(rows)
+
+		count, err := repo.CountWorkspaceMembersAndInvitations(context.Background(), workspaceID)
+		require.NoError(t, err)
+		assert.Equal(t, 5, count)
+
+		err = mock.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("returns zero when no members or invitations", func(t *testing.T) {
+		rows := sqlmock.NewRows([]string{"count"}).AddRow(0)
+
+		mock.ExpectQuery(`SELECT`).
+			WithArgs(workspaceID).
+			WillReturnRows(rows)
+
+		count, err := repo.CountWorkspaceMembersAndInvitations(context.Background(), workspaceID)
+		require.NoError(t, err)
+		assert.Equal(t, 0, count)
+
+		err = mock.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("database error", func(t *testing.T) {
+		mock.ExpectQuery(`SELECT`).
+			WithArgs(workspaceID).
+			WillReturnError(fmt.Errorf("database error"))
+
+		count, err := repo.CountWorkspaceMembersAndInvitations(context.Background(), workspaceID)
+		require.Error(t, err)
+		assert.Equal(t, 0, count)
+		assert.Contains(t, err.Error(), "failed to count workspace members and invitations")
+
+		err = mock.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+}
+
+func TestWorkspaceRepository_CountWorkspaces(t *testing.T) {
+	db, mock, cleanup := testutil.SetupMockDB(t)
+	defer cleanup()
+
+	dbConfig := &config.DatabaseConfig{
+		Prefix: "notifuse",
+	}
+
+	connMgr := newMockConnectionManager(db)
+	repo := NewWorkspaceRepository(db, dbConfig, "secret-key", connMgr)
+
+	t.Run("returns correct count", func(t *testing.T) {
+		rows := sqlmock.NewRows([]string{"count"}).AddRow(5)
+
+		mock.ExpectQuery(`SELECT COUNT`).
+			WillReturnRows(rows)
+
+		count, err := repo.CountWorkspaces(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, 5, count)
+
+		err = mock.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("returns zero when no workspaces", func(t *testing.T) {
+		rows := sqlmock.NewRows([]string{"count"}).AddRow(0)
+
+		mock.ExpectQuery(`SELECT COUNT`).
+			WillReturnRows(rows)
+
+		count, err := repo.CountWorkspaces(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, 0, count)
+
+		err = mock.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("database error", func(t *testing.T) {
+		mock.ExpectQuery(`SELECT COUNT`).
+			WillReturnError(fmt.Errorf("database error"))
+
+		count, err := repo.CountWorkspaces(context.Background())
+		require.Error(t, err)
+		assert.Equal(t, 0, count)
+		assert.Contains(t, err.Error(), "failed to count workspaces")
+
+		err = mock.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+}

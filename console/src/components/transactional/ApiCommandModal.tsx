@@ -514,9 +514,15 @@ func main() {
   }
 
   const renderSMTPInstructions = () => {
-    const smtpHost = window.SMTP_RELAY_DOMAIN || 'your-smtp-domain.com'
-    const smtpPort = window.SMTP_RELAY_PORT || 587
-    const tlsEnabled = window.SMTP_RELAY_TLS_ENABLED !== false
+    const smtpHost = window.SMTP_BRIDGE_DOMAIN || 'your-smtp-domain.com'
+    const smtpPort = window.SMTP_BRIDGE_PORT || 587
+    const tlsMode = window.SMTP_BRIDGE_TLS_MODE
+    const securityLabel =
+      tlsMode === 'implicit'
+        ? t`Implicit TLS (SMTPS)`
+        : tlsMode === 'off'
+          ? t`Plain text (only safe behind a TLS-terminating proxy)`
+          : t`STARTTLS required`
 
     return (
       <div className="space-y-6">
@@ -525,9 +531,7 @@ func main() {
           <Descriptions column={1} size="small" bordered>
             <Descriptions.Item label={t`Host`}>{smtpHost}</Descriptions.Item>
             <Descriptions.Item label={t`Port`}>{smtpPort}</Descriptions.Item>
-            <Descriptions.Item label={t`Security`}>
-              {tlsEnabled ? t`STARTTLS required` : t`Plain text (not recommended for production)`}
-            </Descriptions.Item>
+            <Descriptions.Item label={t`Security`}>{securityLabel}</Descriptions.Item>
             <Descriptions.Item label={t`Username`}>
               {t`Your workspace API email (the email associated with your API key)`}
             </Descriptions.Item>
@@ -907,7 +911,7 @@ public class NotificationSender {
         </div>
       )
     },
-    ...(window.SMTP_RELAY_ENABLED
+    ...(window.SMTP_BRIDGE_ENABLED
       ? [
           {
             key: 'smtp',
@@ -916,7 +920,7 @@ public class NotificationSender {
               <div>
                 <div className="mb-4">
                   <p className="text-sm">
-                    {t`Send transactional notifications using SMTP relay. Perfect for integrating with existing email systems or applications that support SMTP.`}
+                    {t`Send transactional notifications using SMTP bridge. Perfect for integrating with existing email systems or applications that support SMTP.`}
                   </p>
                 </div>
                 {renderSMTPInstructions()}

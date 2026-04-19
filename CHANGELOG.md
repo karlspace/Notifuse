@@ -2,6 +2,57 @@
 
 All notable changes to this project will be documented in this file.
 
+## [29.4] - 2026-04-15
+
+- **Feature**: Added `SMTP_BRIDGE_TLS` setting (`off` / `starttls` / `implicit`) to let operators run the SMTP bridge behind a TLS-terminating reverse proxy or in implicit-TLS (SMTPS) mode (#314)
+- **Feature**: Blog RSS 2.0 and JSON Feed 1.1 syndication — automatic `/feed.xml` and `/feed.json` endpoints per workspace, per-category feeds, conditional GET with ETag, gzip, XSS-sanitized content, autodiscovery `<link>` tags, and admin-configurable feed settings
+- **i18n**: Notification center confirmation banner (subscribe/unsubscribe result) is now translated in all supported languages instead of always showing English (#315)
+
+## [29.3] - 2026-04-12
+
+- **Fix**: Double opt-in confirmation link now correctly transitions contacts from Pending to Active instead of resending the confirmation email in a loop (#313)
+
+## [29.2] - 2026-04-08
+
+- **Feature**: Added OpenAI as LLM provider alongside Anthropic — supports any OpenAI-compatible endpoint (OpenRouter, Ollama, vLLM, LiteLLM, Azure, etc.) via custom base URL, with full streaming and tool use support
+- **Security**: Updated liquidjs to 10.25.5 in console and vitest to 3.2.4 in notification center to fix 5 Dependabot vulnerabilities
+- **Deps**: Updated @vitejs/plugin-react to 5.2.0 in console and notification center
+- **Feature**: Added System Settings drawer for root admin to view and edit system configuration from the dashboard
+- **Workspace**: Enforce workspace creation limits via `MAX_WORKSPACES` env var (0 = unlimited), with "upgrade your plan" messaging in the console
+- **Improvement**: Email open tracking now works independently of click tracking — added Cache-Control headers to prevent proxy caching, encrypted tracking URLs (`/t/`, `/r/`) to avoid pixel blocker detection, and padded tracking pixel (#307)
+- **i18n**: Added Polish language support to the notification center
+
+## [29.1] - 2026-04-07
+
+- **Security**: Upgraded Vite to 7.3.2 in console and notification center to fix arbitrary file read via WebSocket (CVE-2026-39363)
+- **Fix**: Removed invalid `visibility` attribute from MJML section output that caused template compilation errors (#305)
+- **Fix**: Automation now exits when contact is unsubscribed/bounced/complained for marketing emails, while still allowing transactional emails to be sent (#304)
+- **Fix**: Social media buttons now link directly to pages by default instead of wrapping URLs in share prompts; added "Share link" toggle to social element settings (#306)
+
+## [29.0] - 2026-04-04
+
+### Breaking Changes
+
+- **Rename**: "SMTP Relay" renamed to "SMTP Bridge" throughout the application
+  - Environment variables: `SMTP_RELAY_*` renamed to `SMTP_BRIDGE_*` (old names still accepted for backward compatibility)
+  - Database settings keys migrated automatically via V29 migration
+  - JSON API: `smtp_relay_*` fields renamed to `smtp_bridge_*` in setup endpoints
+  - Frontend routes: `/settings/smtp-relay` changed to `/settings/smtp-bridge`
+  - UI labels: "SMTP Relay" changed to "SMTP Bridge"
+
+- **Workspace**: Enforce team member limits via `MAX_USERS` env var (0 = unlimited), with checks on invite, accept invitation, and direct add — API key users are excluded from the count
+
+- **Security**: Fixed SSRF vulnerability in `/api/detect-favicon` endpoint by adding a safe HTTP client with private IP blocking, DNS rebinding protection, scheme validation, and response size limits
+- **Security**: Upgraded happy-dom to 20.8.9 in notification center and picomatch to 4.0.4 in console
+- **Improvement**: SMTP EHLO hostname now defaults to the from-email domain instead of the SMTP host, improving compatibility with strict providers (#301)
+- **Security**: Updated lodash/lodash-es to 4.18.x, brace-expansion to 5.0.5, and yaml to 2.8.3 to fix prototype pollution, code injection, ReDoS, and stack overflow vulnerabilities
+
+## [28.4] - 2026-03-27
+
+- **Security**: Upgraded picomatch to 4.0.4 in notification center
+- **Contacts**: Fixed dropdown menu becoming unresponsive after deleting contacts, and pagination state now persists in URL across page refreshes (#294)
+- **Templates**: Test emails now load the full contact record, so Liquid variables like `{{ contact.first_name }}` render correctly
+
 ## [28.3] - 2026-03-20
 
 - **Security**: Upgraded google.golang.org/grpc to v1.79.3

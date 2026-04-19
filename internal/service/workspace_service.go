@@ -149,6 +149,21 @@ func (s *WorkspaceService) CreateWorkspace(ctx context.Context, id string, name 
 		return nil, &domain.ErrUnauthorized{Message: "only root user can create workspaces"}
 	}
 
+	// Check workspace limit
+	if s.config.MaxWorkspaces > 0 {
+		count, err := s.repo.CountWorkspaces(ctx)
+		if err != nil {
+			s.logger.WithField("error", err.Error()).Error("Failed to count workspaces")
+			return nil, err
+		}
+		if count >= s.config.MaxWorkspaces {
+			return nil, &domain.ErrWorkspaceLimitReached{
+				Limit:   s.config.MaxWorkspaces,
+				Current: count,
+			}
+		}
+	}
+
 	randomSecretKey, err := GenerateSecureKey(32) // 32 bytes = 256 bits
 	if err != nil {
 		s.logger.WithField("workspace_id", id).WithField("error", err.Error()).Error("Failed to generate secure key")
@@ -476,6 +491,21 @@ func (s *WorkspaceService) AddUserToWorkspace(ctx context.Context, workspaceID s
 		return &domain.ErrUnauthorized{Message: "user is not an owner of the workspace"}
 	}
 
+	// Check team member limit
+	if s.config.MaxUsers > 0 {
+		count, err := s.repo.CountWorkspaceMembersAndInvitations(ctx, workspaceID)
+		if err != nil {
+			s.logger.WithField("workspace_id", workspaceID).WithField("error", err.Error()).Error("Failed to count workspace members")
+			return err
+		}
+		if count >= s.config.MaxUsers {
+			return &domain.ErrTeamMemberLimitReached{
+				Limit:   s.config.MaxUsers,
+				Current: count,
+			}
+		}
+	}
+
 	// Use the permissions passed as parameter
 
 	userWorkspace := &domain.UserWorkspace{
@@ -621,6 +651,21 @@ func (s *WorkspaceService) InviteMember(ctx context.Context, workspaceID, email 
 	}
 	if !isMember {
 		return nil, "", fmt.Errorf("inviter is not a member of the workspace")
+	}
+
+	// Check team member limit
+	if s.config.MaxUsers > 0 {
+		count, err := s.repo.CountWorkspaceMembersAndInvitations(ctx, workspaceID)
+		if err != nil {
+			s.logger.WithField("workspace_id", workspaceID).WithField("error", err.Error()).Error("Failed to count workspace members")
+			return nil, "", err
+		}
+		if count >= s.config.MaxUsers {
+			return nil, "", &domain.ErrTeamMemberLimitReached{
+				Limit:   s.config.MaxUsers,
+				Current: count,
+			}
+		}
 	}
 
 	// Get inviter user details for the email
@@ -972,6 +1017,24 @@ func (s *WorkspaceService) AcceptInvitation(ctx context.Context, invitationID, w
 		}
 	}
 
+	// Check team member limit before adding to workspace.
+	// Subtract 1 because the invitation being accepted is still counted in the total
+	// but will be deleted after the user is added — accepting converts an invitation
+	// into a member (net-zero change), so it should not block acceptance.
+	if s.config.MaxUsers > 0 {
+		count, err := s.repo.CountWorkspaceMembersAndInvitations(ctx, workspaceID)
+		if err != nil {
+			s.logger.WithField("workspace_id", workspaceID).WithField("error", err.Error()).Error("Failed to count workspace members")
+			return nil, err
+		}
+		if count-1 >= s.config.MaxUsers {
+			return nil, &domain.ErrTeamMemberLimitReached{
+				Limit:   s.config.MaxUsers,
+				Current: count,
+			}
+		}
+	}
+
 	// Add user to workspace as a member with permissions from invitation
 	userWorkspace := &domain.UserWorkspace{
 		UserID:      user.ID,
@@ -1301,7 +1364,7 @@ func (s *WorkspaceService) UpdateIntegration(ctx context.Context, req domain.Upd
 		if req.LLMProvider != nil {
 			updatedIntegration.LLMProvider = req.LLMProvider
 
-			// Preserve encrypted API key if not provided in update
+			// Preserve Anthropic encrypted API key if not provided in update
 			if req.LLMProvider.Anthropic != nil &&
 				req.LLMProvider.Anthropic.APIKey == "" &&
 				req.LLMProvider.Anthropic.EncryptedAPIKey == "" &&
@@ -1309,6 +1372,16 @@ func (s *WorkspaceService) UpdateIntegration(ctx context.Context, req domain.Upd
 				existingIntegration.LLMProvider.Anthropic != nil {
 				updatedIntegration.LLMProvider.Anthropic.EncryptedAPIKey =
 					existingIntegration.LLMProvider.Anthropic.EncryptedAPIKey
+			}
+
+			// Preserve OpenAI encrypted API key if not provided in update
+			if req.LLMProvider.OpenAI != nil &&
+				req.LLMProvider.OpenAI.APIKey == "" &&
+				req.LLMProvider.OpenAI.EncryptedAPIKey == "" &&
+				existingIntegration.LLMProvider != nil &&
+				existingIntegration.LLMProvider.OpenAI != nil {
+				updatedIntegration.LLMProvider.OpenAI.EncryptedAPIKey =
+					existingIntegration.LLMProvider.OpenAI.EncryptedAPIKey
 			}
 		} else {
 			// If no settings provided, preserve existing

@@ -73,8 +73,8 @@
     "highlight.js": "^11.10.0",
     "html2canvas": "^1.4.1",
     "is-hotkey": "^0.2.0",
-    "liquidjs": "^10.25.0",
-    "lodash": "^4.17.23",
+    "liquidjs": "^10.25.5",
+    "lodash": "^4.18.0",
     "lodash.throttle": "^4.1.1",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.487.0",
@@ -111,7 +111,9 @@
     "markdown-it": ">=14.1.1",
     "minimatch": ">=10.2.3",
     "yaml": "^2.4.2",
-    "flatted": ">=3.4.2"
+    "flatted": ">=3.4.2",
+    "picomatch": ">=4.0.4",
+    "lodash-es": ">=4.18.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
@@ -136,7 +138,7 @@
     "@types/react": "^18.2.43",
     "@types/react-color": "^3.0.13",
     "@types/react-dom": "^18.2.17",
-    "@vitejs/plugin-react": "^5.0.1",
+    "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.4.21",
     "babel-plugin-macros": "^3.1.0",
     "baseline-browser-mapping": "^2.9.18",
@@ -150,7 +152,7 @@
     "tailwindcss": "^4.1.10",
     "typescript": "^5.2.2",
     "typescript-eslint": "^8.31.0",
-    "vite": "^7.1.11",
+    "vite": "^7.3.2",
     "vitest": "^3.0.8"
   }
 }
