@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -959,6 +962,95 @@ func TestTaskService_BroadcastEventHandlers(t *testing.T) {
 
 		// Call the event handler
 		taskService.handleBroadcastPaused(ctx, payload)
+	})
+
+	t.Run("handleBroadcastPaused skips when task already completed (Phase 2)", func(t *testing.T) {
+		ctx := context.Background()
+		workspaceID := "workspace1"
+		broadcastID := "phase2-paused"
+
+		payload := domain.EventPayload{
+			Type:        domain.EventBroadcastPaused,
+			WorkspaceID: workspaceID,
+			Data:        map[string]interface{}{"broadcast_id": broadcastID},
+		}
+
+		task := &domain.Task{
+			ID:          "task-done",
+			WorkspaceID: workspaceID,
+			Type:        "send_broadcast",
+			Status:      domain.TaskStatusCompleted,
+			BroadcastID: &broadcastID,
+		}
+
+		mockRepo.EXPECT().
+			GetTaskByBroadcastID(gomock.Any(), workspaceID, broadcastID).
+			Return(task, nil)
+		// CRITICAL: MarkAsPaused must NOT be called for a completed task.
+
+		taskService.handleBroadcastPaused(ctx, payload)
+	})
+
+	t.Run("handleBroadcastResumed skips when task already completed (Phase 2)", func(t *testing.T) {
+		// This is the critical re-run protection: without the guard, the handler
+		// would flip the task to Pending + NextRunAfter=now, and the next
+		// ExecutePendingTasks tick would re-run the orchestrator.
+		ctx := context.Background()
+		workspaceID := "workspace1"
+		broadcastID := "phase2-resumed"
+
+		payload := domain.EventPayload{
+			Type:        domain.EventBroadcastResumed,
+			WorkspaceID: workspaceID,
+			Data: map[string]interface{}{
+				"broadcast_id": broadcastID,
+				"start_now":    false,
+			},
+		}
+
+		task := &domain.Task{
+			ID:          "task-done",
+			WorkspaceID: workspaceID,
+			Type:        "send_broadcast",
+			Status:      domain.TaskStatusCompleted,
+			BroadcastID: &broadcastID,
+		}
+
+		mockRepo.EXPECT().
+			GetTaskByBroadcastID(gomock.Any(), workspaceID, broadcastID).
+			Return(task, nil)
+		// CRITICAL: Update must NOT be called, otherwise task.Status would be
+		// reset to Pending and orchestrator would re-enqueue every recipient.
+
+		taskService.handleBroadcastResumed(ctx, payload)
+	})
+
+	t.Run("handleBroadcastCancelled skips when task already completed (Phase 2)", func(t *testing.T) {
+		ctx := context.Background()
+		workspaceID := "workspace1"
+		broadcastID := "phase2-cancelled"
+
+		payload := domain.EventPayload{
+			Type:        domain.EventBroadcastCancelled,
+			WorkspaceID: workspaceID,
+			Data:        map[string]interface{}{"broadcast_id": broadcastID},
+		}
+
+		task := &domain.Task{
+			ID:          "task-done",
+			WorkspaceID: workspaceID,
+			Type:        "send_broadcast",
+			Status:      domain.TaskStatusCompleted,
+			BroadcastID: &broadcastID,
+		}
+
+		mockRepo.EXPECT().
+			GetTaskByBroadcastID(gomock.Any(), workspaceID, broadcastID).
+			Return(task, nil)
+		// The enqueue task genuinely succeeded — don't falsify it to Failed.
+		// MarkAsFailed must NOT be called.
+
+		taskService.handleBroadcastCancelled(ctx, payload)
 	})
 }
 
@@ -2600,4 +2692,72 @@ func TestTaskService_ExecuteTask_RecurringReschedules(t *testing.T) {
 		err := taskService.ExecuteTask(ctx, workspace, taskID, timeoutAt)
 		assert.NoError(t, err)
 	})
+}
+
+// Regression test for #320: an auth proxy (Cloudflare Access, oauth2-proxy,
+// etc.) sitting in front of /api/tasks.execute returns a 302 to its login
+// page. The Go default http.Client would follow as a GET to a 200 OK HTML
+// page, and the dispatcher would silently log "dispatched successfully"
+// while the task never ran. The dispatch client configures
+// CheckRedirect = ErrUseLastResponse so the 302 surfaces in the non-200
+// branch — and, critically, the redirect target is never fetched.
+func TestTaskService_ExecutePendingTasks_DoesNotFollowRedirect(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockTaskRepository(ctrl)
+	mockSettingRepo := mocks.NewMockSettingRepository(ctrl)
+	mockLogger := pkgmocks.NewMockLogger(ctrl)
+	var mockAuthService *AuthService = nil
+
+	mockLogger.EXPECT().WithField(gomock.Any(), gomock.Any()).Return(mockLogger).AnyTimes()
+	mockLogger.EXPECT().WithFields(gomock.Any()).Return(mockLogger).AnyTimes()
+	mockLogger.EXPECT().Info(gomock.Any()).AnyTimes()
+	mockLogger.EXPECT().Warn(gomock.Any()).AnyTimes()
+	mockLogger.EXPECT().Debug(gomock.Any()).AnyTimes()
+	mockLogger.EXPECT().Error(gomock.Any()).AnyTimes()
+
+	var loginHits int32
+	loginServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&loginHits, 1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<html>Please log in</html>"))
+	}))
+	defer loginServer.Close()
+
+	var dispatchHits int32
+	dispatchDone := make(chan struct{}, 1)
+	dispatchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&dispatchHits, 1)
+		w.Header().Set("Location", loginServer.URL+"/login")
+		w.WriteHeader(http.StatusFound)
+		select {
+		case dispatchDone <- struct{}{}:
+		default:
+		}
+	}))
+	defer dispatchServer.Close()
+
+	taskService := NewTaskService(mockRepo, mockSettingRepo, mockLogger, mockAuthService, dispatchServer.URL)
+	taskService.SetAutoExecuteImmediate(false)
+
+	mockSettingRepo.EXPECT().SetLastCronRun(gomock.Any()).Return(nil)
+	mockRepo.EXPECT().GetNextBatch(gomock.Any(), gomock.Any()).Return([]*domain.Task{
+		{ID: "t1", WorkspaceID: "ws1", Type: "send_broadcast", Status: domain.TaskStatusPending},
+	}, nil)
+
+	err := taskService.ExecutePendingTasks(context.Background(), 1)
+	assert.NoError(t, err)
+
+	select {
+	case <-dispatchDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for dispatch goroutine to hit test server")
+	}
+	// Give the goroutine a moment to finish processing the response after the
+	// server sent it, so a redirect-follow (if any) would have already fired.
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, int32(1), atomic.LoadInt32(&dispatchHits), "dispatch endpoint should have been called exactly once")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&loginHits), "login endpoint must not be reached — redirect must not be followed")
 }
