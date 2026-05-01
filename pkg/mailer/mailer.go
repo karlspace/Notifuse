@@ -294,7 +294,7 @@ func (m *SMTPMailer) createSMTPClient() (*mail.Client, error) {
 		clientOptions = append(clientOptions,
 			mail.WithUsername(m.config.SMTPUsername),
 			mail.WithPassword(m.config.SMTPPassword),
-			mail.WithSMTPAuth(mail.SMTPAuthAutoDiscover),
+			mail.WithSMTPAuth(selectSMTPAuthType(m.config.UseTLS)),
 		)
 	}
 
@@ -316,6 +316,22 @@ func (m *SMTPMailer) createSMTPClient() (*mail.Client, error) {
 	}
 
 	return client, nil
+}
+
+// selectSMTPAuthType picks the SMTP authentication mechanism.
+//
+// When UseTLS is false, go-mail has two security gates that block PLAIN over
+// an unencrypted connection: SMTPAuthAutoDiscover skips PLAIN/LOGIN at the
+// mechanism-selection step, and SMTPAuthPlain refuses again at the AUTH step
+// ("unencrypted connection" error). SMTPAuthPlainNoEnc bypasses both — the
+// wire protocol is still standard "AUTH PLAIN", so any server that
+// advertises AUTH PLAIN accepts it. The user already accepted plaintext
+// transit by setting UseTLS=false, so this is consistent with their intent.
+func selectSMTPAuthType(useTLS bool) mail.SMTPAuthType {
+	if !useTLS {
+		return mail.SMTPAuthPlainNoEnc
+	}
+	return mail.SMTPAuthAutoDiscover
 }
 
 // ConsoleMailer is a development implementation that just logs emails

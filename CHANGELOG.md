@@ -2,11 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## [30.1] - 2026-04-27
+
+- **Security**: Bumped `go.opentelemetry.io/otel` to v1.41.0 in `telemetry/go.mod` (CVE-2026-29181).
+- **Deps**: Bumped `gomjml` to v0.12.0.
+
+### Breaking Changes
+
+- **SMTP auth with `SMTP_USE_TLS=false`**: When TLS is explicitly disabled, the SMTP client now uses `PLAIN-NOENC` (go-mail's `SMTPAuthPlainNoEnc`) explicitly instead of `SMTPAuthAutoDiscover`. Previously, go-mail's auto-discover refused `PLAIN`/`LOGIN` over an unencrypted connection (only `SCRAM-SHA-*` and `CRAM-MD5` were tried), and `SMTPAuthPlain` itself also refused unencrypted connections at the AUTH step. `PLAIN-NOENC` bypasses both gates while sending the standard `AUTH PLAIN` command on the wire, so any server that advertises `AUTH PLAIN` (e.g. local maddy/Mailpit relays) accepts it. Operators who have set `SMTP_USE_TLS=false` have already accepted plaintext credential transit, so forcing `PLAIN` aligns with their stated intent. **Action**: none if your relay accepts `PLAIN`. If your relay only accepts `SCRAM`/`CRAM-MD5`, you must enable TLS (`SMTP_USE_TLS=true`) — auto-discover continues to apply when TLS is on.
+
+## [30.0] - 2026-04-23
+
+### Breaking Changes
+
+- **Webhooks**: Signatures now conform to the [Standard Webhooks](https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md) specification and match the published verification code in the docs (#318)
+  - Stored secrets are now prefixed with `whsec_` and the 32 random bytes after the prefix are base64-decoded before use as the HMAC key (previously the 44-char base64 string was used directly as raw bytes, making the published Python/JS/Go/PHP verification snippets always fail)
+  - V30 migration rotates every existing webhook secret to the new format. Subscriptions, URLs, event filters, enabled state, and delivery history are preserved; only the secret value changes
+  - **Consumer action required**: copy the new `whsec_…` secret from the console into your environment and update your verification code to the spec-compliant form shown in the docs. Deliveries that fire during the gap will retry automatically once the consumer's secret is updated
+
+### Data migration
+
+- **Timezone**: `Europe/Kiev` is rewritten to the IANA-canonical `Europe/Kyiv` across `workspaces.settings`, `contacts.timezone`, `segments.timezone`, and `broadcasts.schedule.timezone`. Stored `Europe/Kiev` continued to resolve at runtime via Go's tzdata alias, but the console dropdown (which no longer lists the obsolete name) showed an empty selection for affected rows. The `contacts` triggers are briefly disabled around the rename so it does not emit `contact.updated` webhook events or fill `contact_timeline` with rename entries.
+
+### Other changes
+
+- **Task dispatch no longer swallowed by auth proxies (#320, #317)**: The scheduler's internal `POST /api/tasks.execute` client now refuses to follow redirects (`CheckRedirect = http.ErrUseLastResponse`). Previously, an auth-walling reverse proxy (Cloudflare Access, Authelia, oauth2-proxy, Traefik Forward Auth, etc.) sitting in front of the API could respond with a 302 to its login page; Go's default `http.Client` followed the redirect as a GET, the login page returned 200 OK HTML, and the dispatcher logged "dispatched successfully" while the task never ran. The 302 is now surfaced in the non-200 branch (with the `Location` header logged) so the misconfiguration is loud instead of silent. **Operator note**: if your ingress performs an HTTP→HTTPS redirect on the API path, set `$API_ENDPOINT` to the final HTTPS URL — the dispatch client will no longer silently upgrade it.
+- **Task scheduler**: Scheduler tick no longer waits on in-flight HTTP dispatches, so one slow recurring task can't delay dispatch of others on the same tick. Stale tasks left in `running` with an expired `timeout_after` are now reclaimed by `MarkAsRunningTx` on a subsequent tick instead of looping on 409 indefinitely (#317).
+- **Task dispatch observability**: The scheduler-side "Task execution request dispatched successfully" log now includes the HTTP `status_code`, and `tasks.execute` logs an entry line on the handler side. Diffing the two streams makes any remaining silent-interception failure mode visible.
+- **Feature**: Added AWS region `eu-central-2` (Europe, Zurich) to the S3 provider and integrations region selectors (#316).
+
+## [29.5] - 2026-04-20
+
+- **Feature**: Pause, resume, and cancel broadcasts mid-delivery — even after the orchestrator has finished enqueueing — and cancel is now allowed from the Processing state (#303)
+- **Contacts**: Added in-table bulk actions (multi-select delete, add to list, remove from list, unsubscribe) with progress modal and "Skipped" tagging for no-op cases (#299)
+
 ## [29.4] - 2026-04-15
 
 - **Feature**: Added `SMTP_BRIDGE_TLS` setting (`off` / `starttls` / `implicit`) to let operators run the SMTP bridge behind a TLS-terminating reverse proxy or in implicit-TLS (SMTPS) mode (#314)
 - **Feature**: Blog RSS 2.0 and JSON Feed 1.1 syndication — automatic `/feed.xml` and `/feed.json` endpoints per workspace, per-category feeds, conditional GET with ETag, gzip, XSS-sanitized content, autodiscovery `<link>` tags, and admin-configurable feed settings
 - **i18n**: Notification center confirmation banner (subscribe/unsubscribe result) is now translated in all supported languages instead of always showing English (#315)
+- **Security**: Bumped transitive `github.com/prometheus/prometheus` from v0.35.0 to v0.311.2 to clear Dependabot alert for CVE-2026-40179 (stored XSS in Prometheus web UI; Notifuse only imports `model/value`, so it was not exploitable)
 
 ## [29.3] - 2026-04-12
 

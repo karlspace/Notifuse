@@ -257,14 +257,23 @@ func (s *TaskService) ExecutePendingTasks(ctx context.Context, maxTasks int) err
 
 	tracing.AddAttribute(ctx, "execution_mode", "http")
 
-	// Use a wait group to wait for all HTTP requests to complete
-	var wg sync.WaitGroup
-
 	// Create HTTP client with connection pooling for reuse across tasks
 	// Per Go docs: "Clients and Transports are safe for concurrent use by multiple
 	// goroutines and for efficiency should only be created once and re-used."
+	//
+	// CheckRedirect: refuse to follow redirects. The dispatch target is our own
+	// /api/tasks.execute; any 3xx response means something in front of the API
+	// (auth proxy, TLS-upgrading ingress, CDN) has intercepted the request. The
+	// Go default would follow a 302 as a GET to the Location URL — if that URL
+	// is an auth-wall login page returning 200 HTML, the status check below
+	// treats it as success and the task never runs. ErrUseLastResponse returns
+	// the 3xx response unfollowed so the non-200 branch catches it and logs
+	// loudly. See #320 / #317 (Cloudflare Access intercepting dispatch).
 	httpClient := &http.Client{
 		Timeout: 53 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 		Transport: &http.Transport{
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 100,
@@ -276,14 +285,19 @@ func (s *TaskService) ExecutePendingTasks(ctx context.Context, maxTasks int) err
 	}
 	httpClient = tracing.WrapHTTPClient(httpClient)
 
-	// Execute tasks using HTTP roundtrips
+	// Fire-and-forget dispatch: each task runs in its own goroutine bounded by
+	// the http.Client's 53s timeout. The scheduler tick doesn't wait for
+	// in-flight dispatches so one slow handler can't delay the next tick.
+	//
+	// Duplicate-dispatch safety: GetNextBatch only picks up pending/paused
+	// tasks (with next_run_after elapsed) or running tasks whose timeout_after
+	// has expired. Once the handler commits MarkAsRunningTx the row becomes
+	// running with a fresh timeout_after and is skipped by subsequent batches.
+	// The narrow race (tick N+1 fires before tick N's handler commits) is
+	// handled server-side by MarkAsRunningTx returning ErrTaskAlreadyRunning,
+	// which the client logs at Debug on a 409.
 	for _, task := range tasks {
-		// Add to wait group before launching goroutine
-		wg.Add(1)
-
 		go func(t *domain.Task) {
-			defer wg.Done() // Signal completion when goroutine finishes
-
 			taskCtx, taskSpan := tracing.StartServiceSpan(ctx, "TaskService", "DispatchTaskExecution")
 			defer tracing.EndSpan(taskSpan, nil)
 
@@ -342,7 +356,10 @@ func (s *TaskService) ExecutePendingTasks(ctx context.Context, maxTasks int) err
 
 			// Check response
 			if resp.StatusCode != http.StatusOK {
-				body, _ := io.ReadAll(resp.Body)
+				// Bound the body read — a misrouted dispatch can land on an
+				// auth-wall HTML page of tens of KB, and this path fires every
+				// tick until the misconfig is fixed.
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 
 				// 409 Conflict means task is already running - this is expected in concurrent scenarios
 				if resp.StatusCode == http.StatusConflict {
@@ -352,25 +369,28 @@ func (s *TaskService) ExecutePendingTasks(ctx context.Context, maxTasks int) err
 					return
 				}
 
-				// Other non-OK statuses are actual errors
-				err := fmt.Errorf("non-OK status: %d, response: %s", resp.StatusCode, string(body))
-				tracing.MarkSpanError(taskCtx, err)
-				s.logger.WithField("task_id", t.ID).
+				// Other non-OK statuses are actual errors. For 3xx, include the
+				// Location header so an auth-wall / ingress redirect is
+				// immediately obvious in the log.
+				logEntry := s.logger.WithField("task_id", t.ID).
 					WithField("workspace_id", t.WorkspaceID).
 					WithField("status_code", resp.StatusCode).
-					WithField("response", string(body)).
-					Error("HTTP request for task execution returned non-OK status")
+					WithField("response", string(body))
+				if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+					logEntry = logEntry.WithField("location", resp.Header.Get("Location"))
+				}
+				err := fmt.Errorf("non-OK status: %d, response: %s", resp.StatusCode, string(body))
+				tracing.MarkSpanError(taskCtx, err)
+				logEntry.Error("HTTP request for task execution returned non-OK status")
 				return
 			}
 
 			s.logger.WithField("task_id", t.ID).
 				WithField("workspace_id", t.WorkspaceID).
+				WithField("status_code", resp.StatusCode).
 				Info("Task execution request dispatched successfully")
 		}(task)
 	}
-
-	// Wait for all HTTP requests to complete
-	wg.Wait()
 
 	return nil
 }
@@ -959,6 +979,17 @@ func (s *TaskService) handleBroadcastPaused(ctx context.Context, payload domain.
 	tracing.AddAttribute(ctx, "task_id", task.ID)
 	tracing.AddAttribute(ctx, "current_status", string(task.Status))
 
+	// Phase-2 pause: task already completed (orchestrator done enqueueing).
+	// Leave the task alone — we only want to pause the queue rows, which the
+	// service layer handled via PauseBySourceTx before publishing this event.
+	if task.Status == domain.TaskStatusCompleted {
+		s.logger.WithFields(map[string]interface{}{
+			"broadcast_id": broadcastID,
+			"task_id":      task.ID,
+		}).Info("Broadcast paused after task completion - leaving task completed")
+		return
+	}
+
 	// Pause the task
 	nextRunAfter := time.Now().Add(24 * time.Hour) // Pause for 24 hours
 	tracing.AddAttribute(ctx, "next_run_after", nextRunAfter.Format(time.RFC3339))
@@ -1010,6 +1041,18 @@ func (s *TaskService) handleBroadcastResumed(ctx context.Context, payload domain
 
 	tracing.AddAttribute(ctx, "task_id", task.ID)
 	tracing.AddAttribute(ctx, "current_status", string(task.Status))
+
+	// Phase-2 resume: task already completed (orchestrator done enqueueing).
+	// CRITICAL: do not flip the task back to Pending — the next ExecutePendingTasks
+	// tick would re-run the orchestrator and re-enqueue every recipient.
+	// The queue-row resume is handled by the service layer before this event fires.
+	if task.Status == domain.TaskStatusCompleted {
+		s.logger.WithFields(map[string]interface{}{
+			"broadcast_id": broadcastID,
+			"task_id":      task.ID,
+		}).Info("Broadcast resumed after task completion - leaving task completed")
+		return
+	}
 
 	// Resume the task
 	nextRunAfter := time.Now().UTC()
@@ -1189,6 +1232,16 @@ func (s *TaskService) handleBroadcastCancelled(ctx context.Context, payload doma
 
 	tracing.AddAttribute(ctx, "task_id", task.ID)
 	tracing.AddAttribute(ctx, "current_status", string(task.Status))
+
+	// Phase-2 cancel: the enqueue task genuinely succeeded; don't overwrite its
+	// status to Failed. Queue-row deletion is handled by the service layer.
+	if task.Status == domain.TaskStatusCompleted {
+		s.logger.WithFields(map[string]interface{}{
+			"broadcast_id": broadcastID,
+			"task_id":      task.ID,
+		}).Info("Broadcast cancelled after task completion - leaving task completed")
+		return
+	}
 
 	// Mark the task as failed with cancellation reason
 	cancelReason := "Broadcast was cancelled"
