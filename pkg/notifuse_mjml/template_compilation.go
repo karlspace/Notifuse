@@ -172,61 +172,70 @@ func isNonTrackableURL(urlStr string) bool {
 	return false
 }
 
+// applyUTMParameters appends the configured UTM parameters to sourceURL and
+// returns the result. The URL is returned unchanged when it is empty, a Liquid
+// placeholder, a mailto:/tel: link, cannot be parsed, or already carries any
+// utm_* query parameter.
+func (t *TrackingSettings) applyUTMParameters(sourceURL string) string {
+	if sourceURL == "" || strings.Contains(sourceURL, "{{") || strings.Contains(sourceURL, "{%") ||
+		strings.HasPrefix(sourceURL, "mailto:") || strings.HasPrefix(sourceURL, "tel:") {
+		return sourceURL
+	}
+
+	parsedURL, err := url.Parse(sourceURL)
+	if err != nil {
+		return sourceURL
+	}
+
+	queryParams := parsedURL.Query()
+
+	// If the URL already has UTM parameters, leave them untouched
+	for key := range queryParams {
+		if strings.HasPrefix(strings.ToLower(key), "utm_") {
+			return sourceURL
+		}
+	}
+
+	if t.UTMSource != "" {
+		queryParams.Add("utm_source", t.UTMSource)
+	}
+	if t.UTMMedium != "" {
+		queryParams.Add("utm_medium", t.UTMMedium)
+	}
+	if t.UTMCampaign != "" {
+		queryParams.Add("utm_campaign", t.UTMCampaign)
+	}
+	if t.UTMContent != "" {
+		queryParams.Add("utm_content", t.UTMContent)
+	}
+	if t.UTMTerm != "" {
+		queryParams.Add("utm_term", t.UTMTerm)
+	}
+	parsedURL.RawQuery = queryParams.Encode()
+
+	return parsedURL.String()
+}
+
 func (t *TrackingSettings) GetTrackingURL(sourceURL string) string {
 	// Ignore if URL is empty, a placeholder, mailto:, tel:, or already tracked (basic check)
 	if sourceURL == "" || strings.Contains(sourceURL, "{{") || strings.Contains(sourceURL, "{%") || strings.HasPrefix(sourceURL, "mailto:") || strings.HasPrefix(sourceURL, "tel:") {
 		return sourceURL
 	}
 
-	// parse sourceURL to get the domain
-	parsedURL, err := url.Parse(sourceURL)
-	if err != nil {
-		return sourceURL
-	}
-
-	// Get existing query parameters
-	queryParams := parsedURL.Query()
-
-	// Check if URL already has UTM parameters - if yes, don't modify them
-	hasExistingUTM := false
-	for key := range queryParams {
-		if strings.HasPrefix(strings.ToLower(key), "utm_") {
-			hasExistingUTM = true
-			break
-		}
-	}
-
-	// Add UTM parameters to the URL if no existing UTM parameters
-	if !hasExistingUTM {
-		if t.UTMSource != "" {
-			queryParams.Add("utm_source", t.UTMSource)
-		}
-		if t.UTMMedium != "" {
-			queryParams.Add("utm_medium", t.UTMMedium)
-		}
-		if t.UTMCampaign != "" {
-			queryParams.Add("utm_campaign", t.UTMCampaign)
-		}
-		if t.UTMContent != "" {
-			queryParams.Add("utm_content", t.UTMContent)
-		}
-		if t.UTMTerm != "" {
-			queryParams.Add("utm_term", t.UTMTerm)
-		}
-		parsedURL.RawQuery = queryParams.Encode()
-	}
+	// Append UTM parameters to the destination URL
+	destinationURL := t.applyUTMParameters(sourceURL)
 
 	if !t.EnableTracking {
-		return parsedURL.String()
+		return destinationURL
 	}
 
-	// parse endpoint and add url to the query params
+	// parse endpoint and add the UTM-augmented destination URL to the query params
 	parsedEndpoint, err := url.Parse(t.Endpoint)
 	if err != nil {
 		return sourceURL
 	}
 	endpointParams := parsedEndpoint.Query()
-	endpointParams.Add("url", parsedURL.String()) // Use the URL with UTM parameters
+	endpointParams.Add("url", destinationURL)
 	parsedEndpoint.RawQuery = endpointParams.Encode()
 
 	return parsedEndpoint.String()
@@ -234,15 +243,17 @@ func (t *TrackingSettings) GetTrackingURL(sourceURL string) string {
 
 // CompileTemplateRequest represents the request for compiling a template
 type CompileTemplateRequest struct {
-	WorkspaceID             string           `json:"workspace_id"`
-	MessageID               string           `json:"message_id"`
-	VisualEditorTree        EmailBlock       `json:"visual_editor_tree"`
-	MjmlSource              *string          `json:"mjml_source,omitempty"`
-	TemplateData            MapOfAny         `json:"test_data,omitempty"`
-	TrackingSettings        TrackingSettings `json:"tracking_settings,omitempty"`
-	Channel                 string           `json:"channel,omitempty"`                  // "email" or "web"
-	PreserveLiquid          bool             `json:"preserve_liquid,omitempty"`           // When true, skip Liquid template processing and preserve raw syntax
-	SubjectPreviewOverride  *string          `json:"subject_preview_override,omitempty"`  // Override mj-preview content before compilation
+	WorkspaceID            string           `json:"workspace_id"`
+	MessageID              string           `json:"message_id"`
+	VisualEditorTree       EmailBlock       `json:"visual_editor_tree"`
+	MjmlSource             *string          `json:"mjml_source,omitempty"`
+	Subject                *string          `json:"subject,omitempty"`                  // Email subject; processed through Liquid using TemplateData
+	SubjectPreview         *string          `json:"subject_preview,omitempty"`          // Email subject preview (inbox preview text); processed through Liquid
+	TemplateData           MapOfAny         `json:"test_data,omitempty"`
+	TrackingSettings       TrackingSettings `json:"tracking_settings,omitempty"`
+	Channel                string           `json:"channel,omitempty"`                  // "email" or "web"
+	PreserveLiquid         bool             `json:"preserve_liquid,omitempty"`          // When true, skip Liquid template processing and preserve raw syntax
+	SubjectPreviewOverride *string          `json:"subject_preview_override,omitempty"` // Override mj-preview content before compilation
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for CompileTemplateRequest
@@ -304,10 +315,31 @@ func (r *CompileTemplateRequest) Validate() error {
 
 // CompileTemplateResponse represents the response from compiling a template
 type CompileTemplateResponse struct {
-	Success bool        `json:"success"`
-	MJML    *string     `json:"mjml,omitempty"`  // Pointer, omit if nil
-	HTML    *string     `json:"html,omitempty"`  // Pointer, omit if nil
-	Error   *mjml.Error `json:"error,omitempty"` // Pointer, omit if nil
+	Success        bool        `json:"success"`
+	MJML           *string     `json:"mjml,omitempty"`            // Pointer, omit if nil
+	HTML           *string     `json:"html,omitempty"`            // Pointer, omit if nil
+	Subject        *string     `json:"subject,omitempty"`         // Rendered email subject (Liquid processed); omit if not provided in request
+	SubjectPreview *string     `json:"subject_preview,omitempty"` // Rendered email subject preview (Liquid processed); omit if not provided in request
+	Error          *mjml.Error `json:"error,omitempty"`           // Pointer, omit if nil
+}
+
+// renderSubjectField applies the same Liquid rules used for the body to a header
+// field such as Subject or SubjectPreview. Returns the rendered value (or the
+// original when Liquid processing is skipped) and any error wrapped as *mjml.Error
+// so the caller can surface it on the response.
+func renderSubjectField(value *string, data MapOfAny, channel string, preserveLiquid bool, contextLabel string) (*string, *mjml.Error) {
+	if value == nil || *value == "" {
+		return nil, nil
+	}
+	if preserveLiquid || channel == "web" || len(data) == 0 {
+		v := *value
+		return &v, nil
+	}
+	rendered, err := ProcessLiquidTemplate(*value, data, contextLabel)
+	if err != nil {
+		return nil, &mjml.Error{Message: err.Error()}
+	}
+	return &rendered, nil
 }
 
 // GenerateEmailRedirectionEndpoint generates the email redirection endpoint URL
@@ -353,6 +385,18 @@ func GenerateHTMLOpenTrackingPixel(workspaceID string, messageID string, apiEndp
 func CompileTemplate(req CompileTemplateRequest) (resp *CompileTemplateResponse, err error) {
 	var mjmlString string
 
+	// Render Subject and SubjectPreview through Liquid before any body work, so
+	// the rendered values can be returned even when the body fails to compile.
+	// A malformed Liquid expression in the subject short-circuits the response.
+	renderedSubject, subjectErr := renderSubjectField(req.Subject, req.TemplateData, req.Channel, req.PreserveLiquid, "email_subject")
+	if subjectErr != nil {
+		return &CompileTemplateResponse{Success: false, Error: subjectErr}, nil
+	}
+	renderedSubjectPreview, previewErr := renderSubjectField(req.SubjectPreview, req.TemplateData, req.Channel, req.PreserveLiquid, "email_subject_preview")
+	if previewErr != nil {
+		return &CompileTemplateResponse{Success: false, Subject: renderedSubject, Error: previewErr}, nil
+	}
+
 	// If MjmlSource is provided (code mode), use it directly.
 	// Note: Channel filtering is not applied in code mode — code mode users
 	// control their own MJML structure directly.
@@ -369,7 +413,9 @@ func CompileTemplate(req CompileTemplateRequest) (resp *CompileTemplateResponse,
 			processed, err := ProcessLiquidTemplate(mjmlString, req.TemplateData, "mjml-source")
 			if err != nil {
 				return &CompileTemplateResponse{
-					Success: false,
+					Success:        false,
+					Subject:        renderedSubject,
+					SubjectPreview: renderedSubjectPreview,
 					Error: &mjml.Error{
 						Message: err.Error(),
 					},
@@ -399,9 +445,11 @@ func CompileTemplate(req CompileTemplateRequest) (resp *CompileTemplateResponse,
 				jsonDataBytes, err := json.Marshal(req.TemplateData)
 				if err != nil {
 					return &CompileTemplateResponse{
-						Success: false,
-						MJML:    nil,
-						HTML:    nil,
+						Success:        false,
+						MJML:           nil,
+						HTML:           nil,
+						Subject:        renderedSubject,
+						SubjectPreview: renderedSubjectPreview,
 						Error: &mjml.Error{
 							Message: fmt.Sprintf("failed to marshal template data: %v", err),
 						},
@@ -416,9 +464,11 @@ func CompileTemplate(req CompileTemplateRequest) (resp *CompileTemplateResponse,
 				mjmlString, err = ConvertJSONToMJMLWithData(tree, templateDataStr)
 				if err != nil {
 					return &CompileTemplateResponse{
-						Success: false,
-						MJML:    nil,
-						HTML:    nil,
+						Success:        false,
+						MJML:           nil,
+						HTML:           nil,
+						Subject:        renderedSubject,
+						SubjectPreview: renderedSubjectPreview,
 						Error: &mjml.Error{
 							Message: err.Error(),
 						},
@@ -437,8 +487,10 @@ func CompileTemplate(req CompileTemplateRequest) (resp *CompileTemplateResponse,
 		processed, liquidErr := ProcessLiquidTemplate(mjmlString, req.TemplateData, "visual-editor-whole")
 		if liquidErr != nil {
 			return &CompileTemplateResponse{
-				Success: false,
-				Error:   &mjml.Error{Message: liquidErr.Error()},
+				Success:        false,
+				Subject:        renderedSubject,
+				SubjectPreview: renderedSubjectPreview,
+				Error:          &mjml.Error{Message: liquidErr.Error()},
 			}, nil
 		}
 		mjmlString = processed
@@ -461,9 +513,11 @@ func CompileTemplate(req CompileTemplateRequest) (resp *CompileTemplateResponse,
 	if err != nil {
 		// Return the response struct with Success=false and the Error details
 		return &CompileTemplateResponse{
-			Success: false,
-			MJML:    &mjmlString, // Include original MJML for context if desired
-			HTML:    nil,
+			Success:        false,
+			MJML:           &mjmlString, // Include original MJML for context if desired
+			HTML:           nil,
+			Subject:        renderedSubject,
+			SubjectPreview: renderedSubjectPreview,
 			Error: &mjml.Error{
 				Message: err.Error(),
 			},
@@ -477,25 +531,42 @@ func CompileTemplate(req CompileTemplateRequest) (resp *CompileTemplateResponse,
 	// Skip tracking for web channel
 	if req.Channel == "web" {
 		return &CompileTemplateResponse{
-			Success: true,
-			MJML:    &mjmlString,
-			HTML:    &htmlResult, // No tracking applied for web
-			Error:   nil,
+			Success:        true,
+			MJML:           &mjmlString,
+			HTML:           &htmlResult, // No tracking applied for web
+			Subject:        renderedSubject,
+			SubjectPreview: renderedSubjectPreview,
+			Error:          nil,
 		}, nil
 	}
 
-	// Apply link tracking to the HTML output (email channel only)
+	// Apply link tracking to the HTML output (email channel only).
+	// Tracking failures are usually user-content issues (e.g. malformed href in
+	// an mj-button), so surface them as structured compile errors like every
+	// other failure path rather than as a Go error — that way the rendered
+	// subject/subject_preview reach the client instead of being dropped.
 	trackedHTML, err := TrackLinks(htmlResult, req.TrackingSettings)
 	if err != nil {
-		return nil, err
+		return &CompileTemplateResponse{
+			Success:        false,
+			MJML:           &mjmlString,
+			HTML:           nil,
+			Subject:        renderedSubject,
+			SubjectPreview: renderedSubjectPreview,
+			Error: &mjml.Error{
+				Message: err.Error(),
+			},
+		}, nil
 	}
 
 	// Return successful response
 	return &CompileTemplateResponse{
-		Success: true,
-		MJML:    &mjmlString,
-		HTML:    &trackedHTML,
-		Error:   nil,
+		Success:        true,
+		MJML:           &mjmlString,
+		HTML:           &trackedHTML,
+		Subject:        renderedSubject,
+		SubjectPreview: renderedSubjectPreview,
+		Error:          nil,
 	}, nil
 }
 
@@ -560,13 +631,16 @@ func TrackLinks(htmlString string, trackingSettings TrackingSettings) (updatedHT
 			return match // Return original link unchanged
 		}
 
-		// Apply tracking to the URL
-		trackedURL := trackingSettings.GetTrackingURL(originalURL)
+		// Append UTM parameters to the destination URL
+		destinationURL := trackingSettings.applyUTMParameters(originalURL)
+		trackedURL := destinationURL
 
 		if trackingSettings.EnableTracking {
-			// Use current Unix timestamp (seconds) for bot detection
+			// Use current Unix timestamp (seconds) for bot detection.
+			// The UTM-augmented destination URL is what gets encrypted into the
+			// token, so the redirect target preserves the UTM parameters.
 			sentTimestamp := time.Now().Unix()
-			trackedURL = GenerateEmailRedirectionEndpoint(trackingSettings.WorkspaceID, trackingSettings.MessageID, trackingSettings.Endpoint, originalURL, sentTimestamp)
+			trackedURL = GenerateEmailRedirectionEndpoint(trackingSettings.WorkspaceID, trackingSettings.MessageID, trackingSettings.Endpoint, destinationURL, sentTimestamp)
 		}
 
 		// Return the updated tag

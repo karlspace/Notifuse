@@ -672,6 +672,7 @@ func (a *App) InitServices() error {
 		a.logger,
 		a.workspaceRepo,
 		a.messageHistoryRepo,
+		a.contactRepo,
 	)
 
 	// Initialize Supabase service (before workspace service)

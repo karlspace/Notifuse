@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [32.0] - 2026-05-22
+
+### Database Schema Changes
+
+- Migration v32.0 adds a `language` column (`VARCHAR(10) NOT NULL DEFAULT 'en'`) to the system `users` table. Existing users default to English.
+
+### Features
+
+- **Feature**: System emails and the console UI are now localized per user. Each user has a `language` preference — one of `en`, `fr`, `es`, `de`, `ca`, `pt-BR`, `ja`, `it` — that drives both their console UI locale and the language of the system emails (authentication code, workspace invitation, broadcast circuit-breaker alert) sent to them. The language is changed from the console language switcher and persisted via the new `POST /api/user.updateLanguage` endpoint. Magic-code emails use the recipient's language, circuit-breaker alerts use each owner's language, and workspace invitations use the inviter's language.
+
+## [31.0] - 2026-05-19
+
+### Database Schema Changes
+
+- Migration v31.0 updates the `queue_contact_for_segment_recomputation` trigger function on every workspace database to short-circuit when the inserted `contact_timeline` row is itself a segment membership event (`kind IN ('segment.joined', 'segment.left')`).
+
+### Fixes
+
+- **Fix**: `queue_contact_for_segment_recomputation` trigger no longer re-enqueues contacts when the inserted `contact_timeline` event is itself a segment membership change (`segment.joined`/`segment.left`). Removes a self-loop where every membership write re-queued the same contact.
+- **Fix**: Recurring tasks dispatched via HTTP now write `timeout_after` in UTC. The column is `TIMESTAMP WITHOUT TIME ZONE` and the scheduler compares it against `time.Now().UTC()`; on non-UTC hosts the local-time value caused the task to appear "still running" for the host's UTC offset. Same fix applied to the broadcast-pause `next_run_after`.
+- **Fix**: `GetWorkspaceConnection`'s pool health check now uses an isolated context for `pool.PingContext` instead of the caller's. A caller-context cancellation no longer triggers pool eviction.
+
+## [30.3] - 2026-05-14
+
+- **Fix**: UTM parameters (`utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`) were dropped from tracked links when click tracking was enabled — the encrypted `/r/` redirect token embedded the raw destination URL instead of the UTM-augmented one. The UTM parameters are now preserved in the redirect target.
+
+## [30.2] - 2026-05-13
+
+- **Fix**: SES `4.4.7 Message expired` (retry-exhaustion) now suppresses on the first event, and any recipient that accumulates 5 consecutive soft bounces with no successful delivery in between is also suppressed; `MessageTooLarge`/`ContentRejected`/`AttachmentRejected` never count (#323).
+- **Fix**: Email AI Assistant `setEmailTree` tool now declares `items` on its `children` array schema, so OpenAI-compatible providers no longer reject the request with `array schema missing items` (#324). Anthropic was already lenient about this; only OpenAI-compatible endpoints surfaced the error.
+- **Improvement**: `/api/templates.compile` now accepts and returns `subject` and `subject_preview`, rendered through the same Liquid engine used at send time. Previously the API only returned `mjml`/`html`, so the console preview drawer rendered the subject in-browser with `liquidjs`, which could diverge from the Go-side `liquidgo` output used by the send pipeline. Any API consumer can now retrieve the rendered subject directly (#329).
+- **Deps**: Bumped `liquidjs` to 10.25.7, `postcss` to 8.5.14, `fast-xml-parser` override to ≥5.8.0 (+ new `fast-xml-builder` ≥1.1.7 override), and `github.com/prometheus/prometheus` to v0.311.3.
+
 ## [30.1] - 2026-04-27
 
 - **Security**: Bumped `go.opentelemetry.io/otel` to v1.41.0 in `telemetry/go.mod` (CVE-2026-29181).
