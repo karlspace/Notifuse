@@ -1033,6 +1033,9 @@ type WorkspaceServiceInterface interface {
 
 	// Permission management
 	SetUserPermissions(ctx context.Context, workspaceID, userID string, permissions UserPermissions) error
+
+	// Custom field management
+	SetCustomFieldLabels(ctx context.Context, workspaceID string, labels map[string]string) error
 }
 
 // Request/Response types
@@ -1265,6 +1268,35 @@ func (r *DeleteWorkspaceRequest) Validate() error {
 	}
 
 	return nil
+}
+
+// SetCustomFieldLabelsRequest defines the request structure for setting custom field labels
+type SetCustomFieldLabelsRequest struct {
+	WorkspaceID       string            `json:"workspace_id"`
+	CustomFieldLabels map[string]string `json:"custom_field_labels"`
+}
+
+// Validate validates the set custom field labels request and returns the
+// sanitized workspace ID and labels. An empty/nil label map is valid and
+// clears all custom field labels.
+func (r *SetCustomFieldLabelsRequest) Validate() (workspaceID string, labels map[string]string, err error) {
+	if r.WorkspaceID == "" {
+		return "", nil, fmt.Errorf("invalid set custom field labels request: workspace_id is required")
+	}
+	if !govalidator.IsAlphanumeric(r.WorkspaceID) {
+		return "", nil, fmt.Errorf("invalid set custom field labels request: workspace_id must be alphanumeric")
+	}
+	if len(r.WorkspaceID) > 32 {
+		return "", nil, fmt.Errorf("invalid set custom field labels request: workspace_id length must be between 1 and 32")
+	}
+
+	// Reuse the canonical label validation
+	settings := &WorkspaceSettings{CustomFieldLabels: r.CustomFieldLabels}
+	if err := settings.ValidateCustomFieldLabels(); err != nil {
+		return "", nil, err
+	}
+
+	return r.WorkspaceID, r.CustomFieldLabels, nil
 }
 
 type InviteMemberRequest struct {

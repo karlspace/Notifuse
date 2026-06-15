@@ -26,6 +26,7 @@ export function WorkspaceSettingsPage() {
   const [members, setMembers] = useState<WorkspaceMember[]>([])
   const [loadingMembers, setLoadingMembers] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
+  const [canManageCustomFields, setCanManageCustomFields] = useState(false)
   const { refreshWorkspaces, user, workspaces } = useAuth()
   const navigate = useNavigate()
 
@@ -77,6 +78,12 @@ export function WorkspaceSettingsPage() {
       if (user) {
         const currentUserMember = response.members.find((member) => member.user_id === user.id)
         setIsOwner(currentUserMember?.role === 'owner')
+        // Custom fields can be managed by owners or members with workspace:write permission
+        // (mirrors the backend HasPermission(workspace, write) check).
+        setCanManageCustomFields(
+          currentUserMember?.role === 'owner' ||
+            currentUserMember?.permissions?.workspace?.write === true
+        )
       }
     } catch (error) {
       console.error(t`Failed to fetch workspace members`, error)
@@ -131,7 +138,7 @@ export function WorkspaceSettingsPage() {
           <CustomFieldsConfiguration
             workspace={workspace}
             onWorkspaceUpdate={handleWorkspaceUpdate}
-            isOwner={isOwner}
+            canManage={canManageCustomFields}
           />
         )
       case 'smtp-bridge':

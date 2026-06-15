@@ -47,10 +47,10 @@ func TestWorkspaceHandler_Create(t *testing.T) {
 		ID:   "testworkspace1",
 		Name: "Test Workspace",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			CoverURL:        "https://example.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -75,10 +75,10 @@ func TestWorkspaceHandler_Create(t *testing.T) {
 		ID:   "testworkspace1",
 		Name: "Test Workspace",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			CoverURL:        "https://example.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -117,9 +117,9 @@ func TestWorkspaceHandler_Get(t *testing.T) {
 		ID:   "testworkspace1",
 		Name: "Test Workspace",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -163,9 +163,9 @@ func TestWorkspaceHandler_List(t *testing.T) {
 			ID:   "testworkspace1",
 			Name: "Test Workspace 1",
 			Settings: domain.WorkspaceSettings{
-				WebsiteURL: "https://example1.com",
-				LogoURL:    "https://example1.com/logo.png",
-				Timezone:   "UTC",
+				WebsiteURL:      "https://example1.com",
+				LogoURL:         "https://example1.com/logo.png",
+				Timezone:        "UTC",
 				DefaultLanguage: "en",
 				Languages:       []string{"en"},
 				FileManager: domain.FileManagerSettings{
@@ -179,9 +179,9 @@ func TestWorkspaceHandler_List(t *testing.T) {
 			ID:   "testworkspace2",
 			Name: "Test Workspace 2",
 			Settings: domain.WorkspaceSettings{
-				WebsiteURL: "https://example2.com",
-				LogoURL:    "https://example2.com/logo.png",
-				Timezone:   "UTC",
+				WebsiteURL:      "https://example2.com",
+				LogoURL:         "https://example2.com/logo.png",
+				Timezone:        "UTC",
 				DefaultLanguage: "en",
 				Languages:       []string{"en"},
 				FileManager: domain.FileManagerSettings{
@@ -221,10 +221,10 @@ func TestWorkspaceHandler_Update(t *testing.T) {
 		ID:   "testworkspace1",
 		Name: "Updated Workspace",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://updated.com",
-			LogoURL:    "https://updated.com/logo.png",
-			CoverURL:   "https://updated.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://updated.com",
+			LogoURL:         "https://updated.com/logo.png",
+			CoverURL:        "https://updated.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -255,10 +255,10 @@ func TestWorkspaceHandler_Update(t *testing.T) {
 		ID:   "testworkspace1",
 		Name: "Updated Workspace",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://updated.com",
-			LogoURL:    "https://updated.com/logo.png",
-			CoverURL:   "https://updated.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://updated.com",
+			LogoURL:         "https://updated.com/logo.png",
+			CoverURL:        "https://updated.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -501,10 +501,10 @@ func TestWorkspaceHandler_Create_MissingID(t *testing.T) {
 	reqBody := domain.CreateWorkspaceRequest{
 		Name: "Test Workspace",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			CoverURL:        "https://example.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -534,10 +534,10 @@ func TestWorkspaceHandler_Create_MissingName(t *testing.T) {
 	reqBody := domain.CreateWorkspaceRequest{
 		ID: "testworkspace1",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			CoverURL:        "https://example.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -606,10 +606,10 @@ func TestWorkspaceHandler_Create_ServiceError(t *testing.T) {
 		ID:   "testworkspace1",
 		Name: "Test Workspace",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			CoverURL:        "https://example.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -644,10 +644,10 @@ func TestWorkspaceHandler_Create_WorkspaceLimitReached(t *testing.T) {
 		ID:   "testworkspace1",
 		Name: "Test Workspace",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			CoverURL:        "https://example.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -789,10 +789,10 @@ func TestWorkspaceHandler_Update_MissingID(t *testing.T) {
 	reqBody := domain.UpdateWorkspaceRequest{
 		Name: "Updated Workspace",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://updated.com",
-			LogoURL:    "https://updated.com/logo.png",
-			CoverURL:   "https://updated.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://updated.com",
+			LogoURL:         "https://updated.com/logo.png",
+			CoverURL:        "https://updated.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -828,10 +828,10 @@ func TestWorkspaceHandler_Update_ServiceError(t *testing.T) {
 		ID:   "testworkspace1",
 		Name: "Updated Workspace",
 		Settings: domain.WorkspaceSettings{
-			WebsiteURL: "https://updated.com",
-			LogoURL:    "https://updated.com/logo.png",
-			CoverURL:   "https://updated.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://updated.com",
+			LogoURL:         "https://updated.com/logo.png",
+			CoverURL:        "https://updated.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -2820,6 +2820,136 @@ func TestWorkspaceHandler_DeleteInvitation(t *testing.T) {
 		err := json.NewDecoder(w.Body).Decode(&response)
 		require.NoError(t, err)
 		assert.Equal(t, "Method not allowed", response["error"])
+	})
+}
+
+func TestWorkspaceHandler_HandleSetCustomFieldLabels(t *testing.T) {
+	_, workspaceSvc, mux, secretKey, _ := setupTest(t)
+
+	validBody := domain.SetCustomFieldLabelsRequest{
+		WorkspaceID: "workspace123",
+		CustomFieldLabels: map[string]string{
+			"custom_string_1": "Company Name",
+		},
+	}
+
+	t.Run("successful update", func(t *testing.T) {
+		workspaceSvc.EXPECT().
+			SetCustomFieldLabels(gomock.Any(), "workspace123", gomock.Any()).
+			DoAndReturn(func(_ context.Context, _ string, labels map[string]string) error {
+				assert.Equal(t, "Company Name", labels["custom_string_1"])
+				return nil
+			})
+
+		body, err := json.Marshal(validBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces.setCustomFieldLabels", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var response map[string]string
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&response))
+		assert.Equal(t, "success", response["status"])
+		assert.Equal(t, "Custom field labels updated successfully", response["message"])
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces.setCustomFieldLabels", nil)
+		req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("invalid request body", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces.setCustomFieldLabels", strings.NewReader("invalid json"))
+		req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var response map[string]string
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&response))
+		assert.Equal(t, "Invalid request body", response["error"])
+	})
+
+	t.Run("validation error - missing workspace_id", func(t *testing.T) {
+		body, err := json.Marshal(domain.SetCustomFieldLabelsRequest{
+			CustomFieldLabels: map[string]string{"custom_string_1": "Company Name"},
+		})
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces.setCustomFieldLabels", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var response map[string]string
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&response))
+		assert.Contains(t, response["error"], "workspace_id is required")
+	})
+
+	t.Run("validation error - invalid label key", func(t *testing.T) {
+		body, err := json.Marshal(domain.SetCustomFieldLabelsRequest{
+			WorkspaceID:       "workspace123",
+			CustomFieldLabels: map[string]string{"custom_string_99": "Bad"},
+		})
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces.setCustomFieldLabels", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var response map[string]string
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&response))
+		assert.Contains(t, response["error"], "invalid custom field key")
+	})
+
+	t.Run("permission denied returns 403", func(t *testing.T) {
+		permErr := domain.NewPermissionError(domain.PermissionResourceWorkspace, domain.PermissionTypeWrite, "Insufficient permissions: write access to workspace required")
+		workspaceSvc.EXPECT().
+			SetCustomFieldLabels(gomock.Any(), "workspace123", gomock.Any()).
+			Return(permErr)
+
+		body, err := json.Marshal(validBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces.setCustomFieldLabels", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("internal error returns 500", func(t *testing.T) {
+		workspaceSvc.EXPECT().
+			SetCustomFieldLabels(gomock.Any(), "workspace123", gomock.Any()).
+			Return(assert.AnError)
+
+		body, err := json.Marshal(validBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces.setCustomFieldLabels", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
 

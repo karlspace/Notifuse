@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -1089,6 +1090,172 @@ func TestWorkspaceFeaturesSuite(t *testing.T) {
 
 // createTestWorkspaceWithToken creates a test workspace using a pre-obtained token.
 // This avoids redundant authentication calls when the caller already has a valid token.
+// ============================================================================
+// Suite: Custom Field Labels (granular workspace:write permission) — issue #354
+// Verifies that members with workspace:write (not just owners) can manage
+// custom field labels via the dedicated /api/workspaces.setCustomFieldLabels
+// endpoint, and that workspaces.update no longer clobbers labels.
+// ============================================================================
+
+func TestWorkspaceCustomFieldLabelsSuite(t *testing.T) {
+	testutil.SkipIfShort(t)
+	testutil.SetupTestEnvironment()
+	defer testutil.CleanupTestEnvironment()
+
+	suite := testutil.NewIntegrationTestSuite(t, appFactory)
+	defer suite.Cleanup()
+
+	client := suite.APIClient
+	tokenCache := testutil.NewTokenCache(client)
+	db := suite.DBManager.GetDB()
+
+	ownerEmail := "test@example.com"
+	ownerToken := tokenCache.GetOrCreate(t, ownerEmail)
+	client.SetToken(ownerToken)
+
+	// addMember creates a user and inserts a user_workspaces row with the given
+	// granular permissions, returning the member's auth token.
+	addMember := func(t *testing.T, email, workspaceID string, perms domain.UserPermissions) string {
+		t.Helper()
+		token := tokenCache.GetOrCreate(t, email)
+		var userID string
+		require.NoError(t, db.QueryRow("SELECT id FROM users WHERE email = $1", email).Scan(&userID))
+		permsJSON, err := json.Marshal(perms)
+		require.NoError(t, err)
+		_, err = db.Exec(
+			`INSERT INTO user_workspaces (user_id, workspace_id, role, permissions, created_at, updated_at)
+			 VALUES ($1, $2, 'member', $3, NOW(), NOW())
+			 ON CONFLICT (user_id, workspace_id) DO UPDATE SET permissions = EXCLUDED.permissions, updated_at = NOW()`,
+			userID, workspaceID, string(permsJSON),
+		)
+		require.NoError(t, err)
+		return token
+	}
+
+	// labelValue reads a single custom field label directly from the workspace settings JSON.
+	labelValue := func(t *testing.T, workspaceID, key string) string {
+		t.Helper()
+		var label sql.NullString
+		require.NoError(t, db.QueryRow(
+			`SELECT settings->'custom_field_labels'->>$2 FROM workspaces WHERE id = $1`,
+			workspaceID, key,
+		).Scan(&label))
+		return label.String
+	}
+
+	setLabels := func(token, workspaceID string, labels map[string]string) *http.Response {
+		client.SetToken(token)
+		resp, err := client.Post("/api/workspaces.setCustomFieldLabels", domain.SetCustomFieldLabelsRequest{
+			WorkspaceID:       workspaceID,
+			CustomFieldLabels: labels,
+		})
+		require.NoError(t, err)
+		client.SetToken(ownerToken)
+		return resp
+	}
+
+	t.Run("owner can set labels", func(t *testing.T) {
+		workspaceID := createTestWorkspaceWithToken(t, client, ownerToken, "CFL Owner WS")
+
+		resp := setLabels(ownerToken, workspaceID, map[string]string{"custom_string_1": "Company Name"})
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "Company Name", labelValue(t, workspaceID, "custom_string_1"))
+	})
+
+	t.Run("member with workspace:write can set labels (issue #354)", func(t *testing.T) {
+		workspaceID := createTestWorkspaceWithToken(t, client, ownerToken, "CFL Writer WS")
+		memberToken := addMember(t, "workspace-member@example.com", workspaceID, domain.UserPermissions{
+			domain.PermissionResourceWorkspace: {Read: true, Write: true},
+		})
+
+		resp := setLabels(memberToken, workspaceID, map[string]string{"custom_string_1": "Set By Member"})
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "Set By Member", labelValue(t, workspaceID, "custom_string_1"))
+	})
+
+	t.Run("member with workspace read-only is denied", func(t *testing.T) {
+		workspaceID := createTestWorkspaceWithToken(t, client, ownerToken, "CFL ReadOnly WS")
+		memberToken := addMember(t, "workspace-updater@example.com", workspaceID, domain.UserPermissions{
+			domain.PermissionResourceWorkspace: {Read: true, Write: false},
+		})
+
+		resp := setLabels(memberToken, workspaceID, map[string]string{"custom_string_1": "Should Fail"})
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+		assert.Empty(t, labelValue(t, workspaceID, "custom_string_1"))
+	})
+
+	t.Run("member without workspace permission is denied", func(t *testing.T) {
+		workspaceID := createTestWorkspaceWithToken(t, client, ownerToken, "CFL NoPerm WS")
+		// Has contacts access but not workspace.
+		memberToken := addMember(t, "workspace-integrator@example.com", workspaceID, domain.UserPermissions{
+			domain.PermissionResourceContacts: {Read: true, Write: true},
+		})
+
+		resp := setLabels(memberToken, workspaceID, map[string]string{"custom_string_1": "Should Fail"})
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+		assert.Empty(t, labelValue(t, workspaceID, "custom_string_1"))
+	})
+
+	t.Run("invalid label key is rejected", func(t *testing.T) {
+		workspaceID := createTestWorkspaceWithToken(t, client, ownerToken, "CFL Invalid WS")
+
+		resp := setLabels(ownerToken, workspaceID, map[string]string{"custom_string_99": "Bad"})
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("non-member cannot set labels", func(t *testing.T) {
+		workspaceID := createTestWorkspaceWithToken(t, client, ownerToken, "CFL NonMember WS")
+		strangerToken := tokenCache.GetOrCreate(t, "non-member@example.com") // not added to workspace
+
+		resp := setLabels(strangerToken, workspaceID, map[string]string{"custom_string_1": "Should Fail"})
+		defer resp.Body.Close()
+
+		assert.GreaterOrEqual(t, resp.StatusCode, http.StatusBadRequest)
+		assert.NotEqual(t, http.StatusOK, resp.StatusCode)
+		assert.Empty(t, labelValue(t, workspaceID, "custom_string_1"))
+	})
+
+	t.Run("workspaces.update preserves custom field labels (sole-writer guard)", func(t *testing.T) {
+		workspaceID := createTestWorkspaceWithToken(t, client, ownerToken, "CFL SoleWriter WS")
+
+		// Member sets a label via the dedicated endpoint.
+		memberToken := addMember(t, "existing-user@example.com", workspaceID, domain.UserPermissions{
+			domain.PermissionResourceWorkspace: {Read: true, Write: true},
+		})
+		resp := setLabels(memberToken, workspaceID, map[string]string{"custom_string_1": "Member Label"})
+		resp.Body.Close()
+		require.Equal(t, "Member Label", labelValue(t, workspaceID, "custom_string_1"))
+
+		// Owner updates general settings WITHOUT custom_field_labels in the request.
+		client.SetToken(ownerToken)
+		updateResp, err := client.Post("/api/workspaces.update", domain.UpdateWorkspaceRequest{
+			ID:   workspaceID,
+			Name: "Renamed WS",
+			Settings: domain.WorkspaceSettings{
+				Timezone:        "Europe/London",
+				DefaultLanguage: "en",
+				Languages:       []string{"en"},
+			},
+		})
+		require.NoError(t, err)
+		defer updateResp.Body.Close()
+		require.Equal(t, http.StatusOK, updateResp.StatusCode)
+
+		// The label set by the member must be preserved, not wiped by the owner's update.
+		assert.Equal(t, "Member Label", labelValue(t, workspaceID, "custom_string_1"))
+	})
+}
+
 func createTestWorkspaceWithToken(t *testing.T, client *testutil.APIClient, token, name string) string {
 	currentToken := client.GetToken()
 	client.SetToken(token)

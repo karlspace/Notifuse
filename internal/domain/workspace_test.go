@@ -3369,6 +3369,122 @@ func TestSetUserPermissionsRequest_Validate(t *testing.T) {
 	}
 }
 
+func TestSetCustomFieldLabelsRequest_Validate(t *testing.T) {
+	testCases := []struct {
+		name       string
+		request    SetCustomFieldLabelsRequest
+		wantErr    bool
+		errMsg     string
+		wantLabels map[string]string
+	}{
+		{
+			name: "valid request with labels",
+			request: SetCustomFieldLabelsRequest{
+				WorkspaceID: "workspace123",
+				CustomFieldLabels: map[string]string{
+					"custom_string_1": "Company Name",
+					"custom_number_1": "Revenue",
+				},
+			},
+			wantErr: false,
+			wantLabels: map[string]string{
+				"custom_string_1": "Company Name",
+				"custom_number_1": "Revenue",
+			},
+		},
+		{
+			name: "empty labels map is valid (clears all)",
+			request: SetCustomFieldLabelsRequest{
+				WorkspaceID:       "workspace123",
+				CustomFieldLabels: map[string]string{},
+			},
+			wantErr:    false,
+			wantLabels: map[string]string{},
+		},
+		{
+			name: "nil labels map is valid",
+			request: SetCustomFieldLabelsRequest{
+				WorkspaceID:       "workspace123",
+				CustomFieldLabels: nil,
+			},
+			wantErr:    false,
+			wantLabels: nil,
+		},
+		{
+			name: "missing workspace ID",
+			request: SetCustomFieldLabelsRequest{
+				WorkspaceID:       "",
+				CustomFieldLabels: map[string]string{"custom_string_1": "Company Name"},
+			},
+			wantErr: true,
+			errMsg:  "workspace_id is required",
+		},
+		{
+			name: "non-alphanumeric workspace ID",
+			request: SetCustomFieldLabelsRequest{
+				WorkspaceID:       "workspace-123",
+				CustomFieldLabels: map[string]string{"custom_string_1": "Company Name"},
+			},
+			wantErr: true,
+			errMsg:  "workspace_id must be alphanumeric",
+		},
+		{
+			name: "workspace ID too long",
+			request: SetCustomFieldLabelsRequest{
+				WorkspaceID:       strings.Repeat("a", 33),
+				CustomFieldLabels: map[string]string{"custom_string_1": "Company Name"},
+			},
+			wantErr: true,
+			errMsg:  "workspace_id length must be between 1 and 32",
+		},
+		{
+			name: "invalid custom field key",
+			request: SetCustomFieldLabelsRequest{
+				WorkspaceID:       "workspace123",
+				CustomFieldLabels: map[string]string{"custom_string_6": "Invalid"},
+			},
+			wantErr: true,
+			errMsg:  "invalid custom field key",
+		},
+		{
+			name: "empty label value",
+			request: SetCustomFieldLabelsRequest{
+				WorkspaceID:       "workspace123",
+				CustomFieldLabels: map[string]string{"custom_string_1": ""},
+			},
+			wantErr: true,
+			errMsg:  "cannot be empty",
+		},
+		{
+			name: "label too long",
+			request: SetCustomFieldLabelsRequest{
+				WorkspaceID:       "workspace123",
+				CustomFieldLabels: map[string]string{"custom_string_1": strings.Repeat("a", 101)},
+			},
+			wantErr: true,
+			errMsg:  "exceeds maximum length",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			workspaceID, labels, err := tc.request.Validate()
+			if tc.wantErr {
+				assert.Error(t, err)
+				if tc.errMsg != "" {
+					assert.Contains(t, err.Error(), tc.errMsg)
+				}
+				assert.Empty(t, workspaceID)
+				assert.Nil(t, labels)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.request.WorkspaceID, workspaceID)
+				assert.Equal(t, tc.wantLabels, labels)
+			}
+		})
+	}
+}
+
 func TestWorkspaceSettings_ValidateCustomFieldLabels(t *testing.T) {
 	testCases := []struct {
 		name      string

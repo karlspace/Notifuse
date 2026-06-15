@@ -671,6 +671,217 @@ func TestWorkspaceService_CreateWorkspace_DefaultLanguageNotInList(t *testing.T)
 	assert.Contains(t, err.Error(), "default language fr must be in the languages list")
 }
 
+func TestWorkspaceService_SetCustomFieldLabels(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockUserRepo := mocks.NewMockUserRepository(ctrl)
+	mockLogger := pkgmocks.NewMockLogger(ctrl)
+	mockUserService := mocks.NewMockUserServiceInterface(ctrl)
+	mockAuthService := mocks.NewMockAuthService(ctrl)
+	mockMailer := pkgmocks.NewMockMailer(ctrl)
+	mockConfig := &config.Config{RootEmail: "test@example.com"}
+	mockContactService := mocks.NewMockContactService(ctrl)
+	mockListService := mocks.NewMockListService(ctrl)
+	mockContactListService := mocks.NewMockContactListService(ctrl)
+	mockTemplateService := mocks.NewMockTemplateService(ctrl)
+	mockWebhookRegService := mocks.NewMockWebhookRegistrationService(ctrl)
+
+	service := NewWorkspaceService(
+		mockRepo,
+		mockUserRepo,
+		mocks.NewMockTaskRepository(ctrl),
+		mockLogger,
+		mockUserService,
+		mockAuthService,
+		mockMailer,
+		mockConfig,
+		mockContactService,
+		mockListService,
+		mockContactListService,
+		mockTemplateService,
+		mockWebhookRegService,
+		"secret_key",
+		&SupabaseService{},
+		&DNSVerificationService{},
+		&BlogService{},
+	)
+
+	mockLogger.EXPECT().WithField(gomock.Any(), gomock.Any()).Return(mockLogger).AnyTimes()
+	mockLogger.EXPECT().Error(gomock.Any()).AnyTimes()
+
+	ctx := context.Background()
+	workspaceID := "testworkspace"
+	userID := "testuser"
+	labels := map[string]string{
+		"custom_string_1": "Company Name",
+		"custom_number_1": "Revenue",
+	}
+
+	t.Run("owner can set labels", func(t *testing.T) {
+		ownerWorkspace := &domain.UserWorkspace{UserID: userID, WorkspaceID: workspaceID, Role: "owner"}
+		existing := &domain.Workspace{ID: workspaceID, Name: "WS", Settings: domain.WorkspaceSettings{Timezone: "UTC"}}
+
+		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, &domain.User{ID: userID}, ownerWorkspace, nil)
+		mockRepo.EXPECT().GetByID(ctx, workspaceID).Return(existing, nil)
+		mockRepo.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, ws *domain.Workspace) error {
+			assert.Equal(t, labels, ws.Settings.CustomFieldLabels)
+			return nil
+		})
+
+		err := service.SetCustomFieldLabels(ctx, workspaceID, labels)
+		require.NoError(t, err)
+	})
+
+	t.Run("member with workspace write can set labels", func(t *testing.T) {
+		memberWorkspace := &domain.UserWorkspace{
+			UserID:      userID,
+			WorkspaceID: workspaceID,
+			Role:        "member",
+			Permissions: domain.UserPermissions{
+				domain.PermissionResourceWorkspace: {Read: true, Write: true},
+			},
+		}
+		existing := &domain.Workspace{ID: workspaceID, Name: "WS", Settings: domain.WorkspaceSettings{Timezone: "UTC"}}
+
+		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, &domain.User{ID: userID}, memberWorkspace, nil)
+		mockRepo.EXPECT().GetByID(ctx, workspaceID).Return(existing, nil)
+		mockRepo.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, ws *domain.Workspace) error {
+			assert.Equal(t, labels, ws.Settings.CustomFieldLabels)
+			return nil
+		})
+
+		err := service.SetCustomFieldLabels(ctx, workspaceID, labels)
+		require.NoError(t, err)
+	})
+
+	t.Run("member with full permissions can set labels", func(t *testing.T) {
+		memberWorkspace := &domain.UserWorkspace{
+			UserID:      userID,
+			WorkspaceID: workspaceID,
+			Role:        "member",
+			Permissions: domain.FullPermissions,
+		}
+		existing := &domain.Workspace{ID: workspaceID, Name: "WS", Settings: domain.WorkspaceSettings{Timezone: "UTC"}}
+
+		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, &domain.User{ID: userID}, memberWorkspace, nil)
+		mockRepo.EXPECT().GetByID(ctx, workspaceID).Return(existing, nil)
+		mockRepo.EXPECT().Update(ctx, gomock.Any()).Return(nil)
+
+		err := service.SetCustomFieldLabels(ctx, workspaceID, labels)
+		require.NoError(t, err)
+	})
+
+	t.Run("member with workspace read only is denied", func(t *testing.T) {
+		memberWorkspace := &domain.UserWorkspace{
+			UserID:      userID,
+			WorkspaceID: workspaceID,
+			Role:        "member",
+			Permissions: domain.UserPermissions{
+				domain.PermissionResourceWorkspace: {Read: true, Write: false},
+			},
+		}
+
+		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, &domain.User{ID: userID}, memberWorkspace, nil)
+		// No GetByID / Update expected.
+
+		err := service.SetCustomFieldLabels(ctx, workspaceID, labels)
+		require.Error(t, err)
+		var permErr *domain.PermissionError
+		assert.ErrorAs(t, err, &permErr)
+	})
+
+	t.Run("member with nil permissions is denied", func(t *testing.T) {
+		memberWorkspace := &domain.UserWorkspace{
+			UserID:      userID,
+			WorkspaceID: workspaceID,
+			Role:        "member",
+			Permissions: nil,
+		}
+
+		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, &domain.User{ID: userID}, memberWorkspace, nil)
+
+		err := service.SetCustomFieldLabels(ctx, workspaceID, labels)
+		require.Error(t, err)
+		var permErr *domain.PermissionError
+		assert.ErrorAs(t, err, &permErr)
+	})
+
+	t.Run("authentication failure returns error", func(t *testing.T) {
+		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, nil, nil, assert.AnError)
+
+		err := service.SetCustomFieldLabels(ctx, workspaceID, labels)
+		require.Error(t, err)
+	})
+
+	t.Run("get workspace error is propagated", func(t *testing.T) {
+		ownerWorkspace := &domain.UserWorkspace{UserID: userID, WorkspaceID: workspaceID, Role: "owner"}
+
+		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, &domain.User{ID: userID}, ownerWorkspace, nil)
+		mockRepo.EXPECT().GetByID(ctx, workspaceID).Return(nil, assert.AnError)
+
+		err := service.SetCustomFieldLabels(ctx, workspaceID, labels)
+		require.Error(t, err)
+	})
+
+	t.Run("update error is propagated", func(t *testing.T) {
+		ownerWorkspace := &domain.UserWorkspace{UserID: userID, WorkspaceID: workspaceID, Role: "owner"}
+		existing := &domain.Workspace{ID: workspaceID, Name: "WS", Settings: domain.WorkspaceSettings{Timezone: "UTC"}}
+
+		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, &domain.User{ID: userID}, ownerWorkspace, nil)
+		mockRepo.EXPECT().GetByID(ctx, workspaceID).Return(existing, nil)
+		mockRepo.EXPECT().Update(ctx, gomock.Any()).Return(assert.AnError)
+
+		err := service.SetCustomFieldLabels(ctx, workspaceID, labels)
+		require.Error(t, err)
+	})
+
+	t.Run("invalid label is rejected before update", func(t *testing.T) {
+		ownerWorkspace := &domain.UserWorkspace{UserID: userID, WorkspaceID: workspaceID, Role: "owner"}
+		existing := &domain.Workspace{ID: workspaceID, Name: "WS", Settings: domain.WorkspaceSettings{Timezone: "UTC"}}
+
+		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, &domain.User{ID: userID}, ownerWorkspace, nil)
+		mockRepo.EXPECT().GetByID(ctx, workspaceID).Return(existing, nil)
+		// No Update expected — validation fails first.
+
+		err := service.SetCustomFieldLabels(ctx, workspaceID, map[string]string{"custom_string_99": "Bad"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid custom field key")
+	})
+
+	t.Run("empty labels clears all and preserves other settings", func(t *testing.T) {
+		ownerWorkspace := &domain.UserWorkspace{UserID: userID, WorkspaceID: workspaceID, Role: "owner"}
+		existing := &domain.Workspace{
+			ID:   workspaceID,
+			Name: "WS",
+			Settings: domain.WorkspaceSettings{
+				WebsiteURL:        "https://example.com",
+				Timezone:          "Europe/Paris",
+				DefaultLanguage:   "en",
+				FileManager:       domain.FileManagerSettings{Bucket: "my-bucket", AccessKey: "AKIA"},
+				CustomFieldLabels: map[string]string{"custom_string_1": "Old"},
+			},
+		}
+
+		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, &domain.User{ID: userID}, ownerWorkspace, nil)
+		mockRepo.EXPECT().GetByID(ctx, workspaceID).Return(existing, nil)
+		mockRepo.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, ws *domain.Workspace) error {
+			// Labels cleared
+			assert.Empty(t, ws.Settings.CustomFieldLabels)
+			// Other settings preserved untouched
+			assert.Equal(t, "https://example.com", ws.Settings.WebsiteURL)
+			assert.Equal(t, "Europe/Paris", ws.Settings.Timezone)
+			assert.Equal(t, "my-bucket", ws.Settings.FileManager.Bucket)
+			assert.Equal(t, "AKIA", ws.Settings.FileManager.AccessKey)
+			return nil
+		})
+
+		err := service.SetCustomFieldLabels(ctx, workspaceID, map[string]string{})
+		require.NoError(t, err)
+	})
+}
+
 func TestWorkspaceService_UpdateWorkspace(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -728,10 +939,10 @@ func TestWorkspaceService_UpdateWorkspace(t *testing.T) {
 		}
 
 		settings := domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			CoverURL:        "https://example.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -775,10 +986,10 @@ func TestWorkspaceService_UpdateWorkspace(t *testing.T) {
 		mockAuthService.EXPECT().AuthenticateUserForWorkspace(ctx, workspaceID).Return(ctx, nil, nil, assert.AnError)
 
 		settings := domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			CoverURL:        "https://example.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -806,10 +1017,10 @@ func TestWorkspaceService_UpdateWorkspace(t *testing.T) {
 		}
 
 		settings := domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			CoverURL:        "https://example.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -834,10 +1045,10 @@ func TestWorkspaceService_UpdateWorkspace(t *testing.T) {
 		}
 
 		settings := domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			LogoURL:         "https://example.com/logo.png",
+			CoverURL:        "https://example.com/cover.png",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -856,7 +1067,11 @@ func TestWorkspaceService_UpdateWorkspace(t *testing.T) {
 		assert.Equal(t, assert.AnError, err)
 	})
 
-	t.Run("successful update with custom field labels", func(t *testing.T) {
+	t.Run("preserves custom field labels and ignores request labels", func(t *testing.T) {
+		// Custom field labels are managed exclusively via SetCustomFieldLabels. UpdateWorkspace
+		// must NOT modify them: it preserves the labels already stored on the workspace and
+		// ignores any labels passed in the update request (prevents a stale owner save from
+		// clobbering labels set by a member with workspace:write).
 		expectedUser := &domain.User{
 			ID: userID,
 		}
@@ -867,18 +1082,18 @@ func TestWorkspaceService_UpdateWorkspace(t *testing.T) {
 			Role:        "owner",
 		}
 
-		customFieldLabels := map[string]string{
-			"custom_string_1":   "Company Name",
-			"custom_number_1":   "Revenue",
-			"custom_datetime_1": "Contract Start",
-			"custom_json_1":     "Metadata",
+		// Labels already stored on the workspace (set via the dedicated endpoint).
+		existingLabels := map[string]string{
+			"custom_string_1": "Existing Label",
+		}
+		// Different labels in the update request — these must be IGNORED.
+		requestLabels := map[string]string{
+			"custom_number_1": "From Request",
 		}
 
 		settings := domain.WorkspaceSettings{
-			WebsiteURL: "https://example.com",
-			LogoURL:    "https://example.com/logo.png",
-			CoverURL:   "https://example.com/cover.png",
-			Timezone:   "UTC",
+			WebsiteURL:      "https://example.com",
+			Timezone:        "UTC",
 			DefaultLanguage: "en",
 			Languages:       []string{"en"},
 			FileManager: domain.FileManagerSettings{
@@ -886,14 +1101,15 @@ func TestWorkspaceService_UpdateWorkspace(t *testing.T) {
 				Bucket:    "my-bucket",
 				AccessKey: "AKIAIOSFODNN7EXAMPLE",
 			},
-			CustomFieldLabels: customFieldLabels,
+			CustomFieldLabels: requestLabels,
 		}
 
 		existingWorkspace := &domain.Workspace{
 			ID:   workspaceID,
 			Name: "Original Workspace Name",
 			Settings: domain.WorkspaceSettings{
-				WebsiteURL: "https://old-example.com",
+				WebsiteURL:        "https://old-example.com",
+				CustomFieldLabels: existingLabels,
 			},
 			CreatedAt: time.Now().Add(-24 * time.Hour),
 			UpdatedAt: time.Now().Add(-24 * time.Hour),
@@ -903,20 +1119,16 @@ func TestWorkspaceService_UpdateWorkspace(t *testing.T) {
 		mockRepo.EXPECT().GetUserWorkspace(ctx, userID, workspaceID).Return(expectedUserWorkspace, nil)
 		mockRepo.EXPECT().GetByID(ctx, workspaceID).Return(existingWorkspace, nil)
 		mockRepo.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(ctx context.Context, workspace *domain.Workspace) error {
-			// Verify custom field labels are correctly set
-			assert.NotNil(t, workspace.Settings.CustomFieldLabels)
-			assert.Equal(t, customFieldLabels, workspace.Settings.CustomFieldLabels)
-			assert.Equal(t, "Company Name", workspace.Settings.CustomFieldLabels["custom_string_1"])
-			assert.Equal(t, "Revenue", workspace.Settings.CustomFieldLabels["custom_number_1"])
-			assert.Equal(t, "Contract Start", workspace.Settings.CustomFieldLabels["custom_datetime_1"])
-			assert.Equal(t, "Metadata", workspace.Settings.CustomFieldLabels["custom_json_1"])
+			// Existing labels preserved, request labels ignored.
+			assert.Equal(t, existingLabels, workspace.Settings.CustomFieldLabels)
+			assert.NotContains(t, workspace.Settings.CustomFieldLabels, "custom_number_1")
 			return nil
 		})
 
 		workspace, err := service.UpdateWorkspace(ctx, workspaceID, "Updated Workspace", settings)
 		require.NoError(t, err)
 		assert.NotNil(t, workspace)
-		assert.Equal(t, customFieldLabels, workspace.Settings.CustomFieldLabels)
+		assert.Equal(t, existingLabels, workspace.Settings.CustomFieldLabels)
 	})
 
 	t.Run("preserves template blocks when not provided", func(t *testing.T) {

@@ -372,7 +372,11 @@ func (s *WorkspaceService) UpdateWorkspace(ctx context.Context, id string, name 
 	}
 
 	existingWorkspace.Settings.CustomEndpointURL = settings.CustomEndpointURL
-	existingWorkspace.Settings.CustomFieldLabels = settings.CustomFieldLabels
+	// Note: Custom field labels are intentionally NOT updated here. They are managed
+	// exclusively via the dedicated /api/workspaces.setCustomFieldLabels endpoint, which
+	// enforces granular workspace:write permission instead of requiring owner role. This
+	// also prevents an owner's (possibly stale) settings save from clobbering labels set
+	// by a member. Existing labels on existingWorkspace are preserved as-is.
 	existingWorkspace.Settings.BlogEnabled = settings.BlogEnabled
 	existingWorkspace.Settings.BlogSettings = settings.BlogSettings
 	existingWorkspace.Settings.DefaultLanguage = settings.DefaultLanguage
@@ -815,6 +819,51 @@ func (s *WorkspaceService) SetUserPermissions(ctx context.Context, workspaceID, 
 		if len(sessions) > 0 {
 			s.logger.WithField("target_user_id", userID).WithField("sessions_invalidated", len(sessions)).Info("Invalidated user sessions after permission change")
 		}
+	}
+
+	return nil
+}
+
+// SetCustomFieldLabels updates the custom field display labels for a workspace.
+// Unlike most workspace settings (which are owner-only via UpdateWorkspace), this
+// is the dedicated, granular-permission path: it requires write access to the
+// workspace resource, so workspace owners and members with workspace:write (e.g.
+// "full access") can manage custom field labels.
+func (s *WorkspaceService) SetCustomFieldLabels(ctx context.Context, workspaceID string, labels map[string]string) error {
+	var userWorkspace *domain.UserWorkspace
+	var err error
+	ctx, _, userWorkspace, err = s.authService.AuthenticateUserForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for writing workspace settings
+	if !userWorkspace.HasPermission(domain.PermissionResourceWorkspace, domain.PermissionTypeWrite) {
+		return domain.NewPermissionError(
+			domain.PermissionResourceWorkspace,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to workspace required",
+		)
+	}
+
+	// Load the existing workspace and update only the custom field labels,
+	// preserving all other settings.
+	existingWorkspace, err := s.repo.GetByID(ctx, workspaceID)
+	if err != nil {
+		s.logger.WithField("workspace_id", workspaceID).WithField("error", err.Error()).Error("Failed to get existing workspace")
+		return err
+	}
+
+	existingWorkspace.Settings.CustomFieldLabels = labels
+
+	// Canonical validation (covers non-console API consumers too)
+	if err := existingWorkspace.Settings.ValidateCustomFieldLabels(); err != nil {
+		return err
+	}
+
+	if err := s.repo.Update(ctx, existingWorkspace); err != nil {
+		s.logger.WithField("workspace_id", workspaceID).WithField("error", err.Error()).Error("Failed to update custom field labels")
+		return err
 	}
 
 	return nil
