@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [32.4] - 2026-06-15
 
+- **Feature**: `ROOT_EMAIL` now accepts multiple comma/semicolon-separated emails, so a shared self-hosted instance can have more than one root administrator without displacing the first. Root-gated actions (workspace creation, system settings, root HMAC sign-in) now check list membership instead of a single equality, and a user row is created on startup for every listed root so each can sign in immediately. Matching is case-sensitive and a single email behaves exactly as before. The console System Settings drawer edits the list as tags; the setup wizard still establishes the primary (first) root. Example: `ROOT_EMAIL=alice@example.com,bob@example.com` (#361).
 - **Fix**: Translated email templates now send with their own inbox preview text (preheader) instead of the default language's. The inbox preview is rendered from the `mj-preview` block embedded in the email tree, but the metadata-sync that stamps it from the `subject_preview` field only ran for the default template — never for translations — so a translation kept the preview value it was cloned with, even after its preview was edited and saved. The sync now stamps every language variant, and all send paths (broadcast, automation, transactional) additionally inject each resolved variant's `subject_preview` at compile time, which also corrects already-saved translations without a re-save (#359).
 
 ## [32.3] - 2026-06-01

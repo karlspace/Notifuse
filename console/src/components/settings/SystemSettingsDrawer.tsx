@@ -14,7 +14,8 @@ import {
   Modal,
   Tooltip,
   Space,
-  Spin
+  Spin,
+  Select
 } from 'antd'
 import {
   SettingOutlined,
@@ -23,6 +24,7 @@ import {
 } from '@ant-design/icons'
 import { useLingui } from '@lingui/react/macro'
 import { settingsApi } from '../../services/api/settings'
+import { parseRootEmails } from '../../services/api/auth'
 import type { SystemSettingsData } from '../../types/settings'
 
 const { Text, Title } = Typography
@@ -66,6 +68,24 @@ export function SystemSettingsDrawer() {
   const bridgeEnabled = Form.useWatch('smtp_bridge_enabled', form)
 
   const isOverridden = (field: string) => envOverrides[field] === true
+
+  // Validates the root_email field, which may hold one or more emails. The form
+  // store value is a comma-joined string (post-normalize), but accept an array
+  // too in case validation runs before normalize.
+  const validateRootEmails = (_rule: unknown, value: unknown): Promise<void> => {
+    const emails = Array.isArray(value)
+      ? value.map((email) => String(email).trim()).filter(Boolean)
+      : parseRootEmails(typeof value === 'string' ? value : '')
+    if (emails.length === 0) {
+      return Promise.reject(new Error(t`At least one root email is required`))
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const invalid = emails.filter((email) => !emailRegex.test(email))
+    if (invalid.length > 0) {
+      return Promise.reject(new Error(t`Invalid email: ${invalid.join(', ')}`))
+    }
+    return Promise.resolve()
+  }
 
   const renderEnvHint = (field: string) => {
     if (!isOverridden(field)) return null
@@ -231,13 +251,23 @@ export function SystemSettingsDrawer() {
                 <Form.Item
                   label={t`Root Email`}
                   name="root_email"
-                  rules={[
-                    { required: true, message: t`Required` },
-                    { type: 'email', message: t`Invalid email` }
-                  ]}
+                  // Store value stays a comma-joined string; the tags Select edits
+                  // it as a list. Decode string -> string[] for the control and
+                  // encode string[] -> string back into the form store.
+                  getValueProps={(value) => ({ value: parseRootEmails(value) })}
+                  normalize={(value) =>
+                    Array.isArray(value) ? value.join(',') : value ?? ''
+                  }
+                  rules={[{ validator: validateRootEmails }]}
                   help={renderEnvHint('root_email')}
                 >
-                  <Input disabled={isOverridden('root_email')} />
+                  <Select
+                    mode="tags"
+                    open={false}
+                    tokenSeparators={[',', ';', ' ']}
+                    disabled={isOverridden('root_email')}
+                    placeholder="admin@example.com"
+                  />
                 </Form.Item>
               </Col>
               <Col span={12}>

@@ -526,6 +526,107 @@ func TestWorkspaceService_CreateWorkspace(t *testing.T) {
 	})
 }
 
+func TestWorkspaceService_CreateWorkspace_MultipleRootEmails(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockUserRepo := mocks.NewMockUserRepository(ctrl)
+	mockTaskRepo := mocks.NewMockTaskRepository(ctrl)
+	mockLogger := pkgmocks.NewMockLogger(ctrl)
+	mockUserService := mocks.NewMockUserServiceInterface(ctrl)
+	mockAuthService := mocks.NewMockAuthService(ctrl)
+	mockMailer := pkgmocks.NewMockMailer(ctrl)
+	// Two configured root users (comma-separated).
+	mockConfig := &config.Config{RootEmail: "root1@example.com,root2@example.com"}
+	mockContactService := mocks.NewMockContactService(ctrl)
+	mockListService := mocks.NewMockListService(ctrl)
+	mockContactListService := mocks.NewMockContactListService(ctrl)
+	mockTemplateService := mocks.NewMockTemplateService(ctrl)
+	mockWebhookRegService := mocks.NewMockWebhookRegistrationService(ctrl)
+
+	service := NewWorkspaceService(
+		mockRepo,
+		mockUserRepo,
+		mockTaskRepo,
+		mockLogger,
+		mockUserService,
+		mockAuthService,
+		mockMailer,
+		mockConfig,
+		mockContactService,
+		mockListService,
+		mockContactListService,
+		mockTemplateService,
+		mockWebhookRegService,
+		"secret_key",
+		&SupabaseService{},
+		&DNSVerificationService{},
+		&BlogService{},
+	)
+
+	mockLogger.EXPECT().WithField(gomock.Any(), gomock.Any()).Return(mockLogger).AnyTimes()
+	mockLogger.EXPECT().Error(gomock.Any()).AnyTimes()
+	mockLogger.EXPECT().Info(gomock.Any()).AnyTimes()
+
+	ctx := context.Background()
+
+	t.Run("second listed root can create a workspace", func(t *testing.T) {
+		workspaceID := "secondroot"
+		secondRoot := &domain.User{ID: "root2", Email: "root2@example.com", Name: "Second Root"}
+
+		mockAuthService.EXPECT().AuthenticateUserFromContext(ctx).Return(secondRoot, nil)
+		mockRepo.EXPECT().GetByID(ctx, workspaceID).Return(nil, nil)
+		mockRepo.EXPECT().Create(ctx, gomock.Any()).Return(nil)
+		mockRepo.EXPECT().AddUserToWorkspace(ctx, gomock.Any()).Return(nil)
+		mockUserService.EXPECT().GetUserByID(ctx, secondRoot.ID).Return(secondRoot, nil)
+		mockContactService.EXPECT().UpsertContact(ctx, workspaceID, gomock.Any()).Return(domain.UpsertContactOperation{Action: domain.UpsertContactOperationCreate})
+		mockListService.EXPECT().CreateList(ctx, workspaceID, gomock.Any()).Return(nil)
+		mockListService.EXPECT().SubscribeToLists(ctx, gomock.Any(), true).Return(nil)
+		mockTaskRepo.EXPECT().List(ctx, workspaceID, gomock.Any()).Return([]*domain.Task{}, 0, nil).AnyTimes()
+		mockTaskRepo.EXPECT().Create(ctx, workspaceID, gomock.Any()).Return(nil).AnyTimes()
+
+		workspace, err := service.CreateWorkspace(ctx, workspaceID, "Second Root Workspace", "https://example.com", "https://example.com/logo.png", "https://example.com/cover.png", "UTC", domain.FileManagerSettings{
+			Endpoint:  "https://s3.amazonaws.com",
+			Bucket:    "my-bucket",
+			AccessKey: "AKIAIOSFODNN7EXAMPLE",
+		}, "en", []string{"en"})
+		require.NoError(t, err)
+		assert.Equal(t, workspaceID, workspace.ID)
+	})
+
+	t.Run("non-listed user is rejected", func(t *testing.T) {
+		outsider := &domain.User{ID: "outsider", Email: "outsider@example.com", Name: "Outsider"}
+		mockAuthService.EXPECT().AuthenticateUserFromContext(ctx).Return(outsider, nil)
+
+		workspace, err := service.CreateWorkspace(ctx, "outsiderws", "Outsider Workspace", "https://example.com", "https://example.com/logo.png", "https://example.com/cover.png", "UTC", domain.FileManagerSettings{
+			Endpoint:  "https://s3.amazonaws.com",
+			Bucket:    "my-bucket",
+			AccessKey: "AKIAIOSFODNN7EXAMPLE",
+		}, "en", []string{"en"})
+		require.Error(t, err)
+		assert.Nil(t, workspace)
+		var unauthorized *domain.ErrUnauthorized
+		assert.ErrorAs(t, err, &unauthorized)
+	})
+
+	t.Run("case-sensitive mismatch is rejected", func(t *testing.T) {
+		// "Root1@example.com" differs in case from the configured "root1@example.com".
+		mixedCase := &domain.User{ID: "mixed", Email: "Root1@example.com", Name: "Mixed Case"}
+		mockAuthService.EXPECT().AuthenticateUserFromContext(ctx).Return(mixedCase, nil)
+
+		workspace, err := service.CreateWorkspace(ctx, "mixedws", "Mixed Workspace", "https://example.com", "https://example.com/logo.png", "https://example.com/cover.png", "UTC", domain.FileManagerSettings{
+			Endpoint:  "https://s3.amazonaws.com",
+			Bucket:    "my-bucket",
+			AccessKey: "AKIAIOSFODNN7EXAMPLE",
+		}, "en", []string{"en"})
+		require.Error(t, err)
+		assert.Nil(t, workspace)
+		var unauthorized *domain.ErrUnauthorized
+		assert.ErrorAs(t, err, &unauthorized)
+	})
+}
+
 func TestWorkspaceService_CreateWorkspace_CustomLanguageSettings(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

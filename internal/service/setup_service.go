@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	appconfig "github.com/Notifuse/notifuse/config"
 	"github.com/Notifuse/notifuse/internal/domain"
 	"github.com/Notifuse/notifuse/pkg/logger"
 	"github.com/google/uuid"
@@ -327,10 +328,14 @@ func (s *SetupService) Initialize(ctx context.Context, config *SetupConfig) erro
 		return fmt.Errorf("failed to save system configuration: %w", err)
 	}
 
-	// Create root user (use final merged email)
+	// Create the primary root user. When ROOT_EMAIL holds a list, the first
+	// email is the primary; additional roots are created on startup by
+	// InitializeDatabase. Using the raw list string here would create a user
+	// with an invalid comma-joined email.
+	primaryRootEmail := appconfig.PrimaryRootEmail(finalConfig.RootEmail)
 	rootUser := &domain.User{
 		ID:        uuid.New().String(),
-		Email:     finalConfig.RootEmail,
+		Email:     primaryRootEmail,
 		Name:      "Root User",
 		Type:      domain.UserTypeUser,
 		CreatedAt: time.Now().UTC(),
@@ -344,10 +349,10 @@ func (s *SetupService) Initialize(ctx context.Context, config *SetupConfig) erro
 			return fmt.Errorf("failed to create root user: %w", err)
 		}
 		// User already exists - this is fine during setup, continue
-		s.logger.WithField("email", finalConfig.RootEmail).Info("Root user already exists, skipping creation")
+		s.logger.WithField("email", primaryRootEmail).Info("Root user already exists, skipping creation")
 	}
 
-	s.logger.WithField("email", finalConfig.RootEmail).Info("Setup wizard completed successfully")
+	s.logger.WithField("email", primaryRootEmail).Info("Setup wizard completed successfully")
 
 	// Reload configuration if callback is provided
 	if s.onSetupCompleted != nil {

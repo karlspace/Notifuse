@@ -63,6 +63,10 @@ const testRootEmail = "root@example.com"
 const testSecretKey = "test-secret-key-32-bytes-long!!"
 
 func setupSettingsHandler(t *testing.T) (*SettingsHandler, *mockSettingRepository, *mockUserServiceForSettings, *mockAppShutdowner) {
+	return setupSettingsHandlerWithRootEmail(t, testRootEmail)
+}
+
+func setupSettingsHandlerWithRootEmail(t *testing.T, rootEmail string) (*SettingsHandler, *mockSettingRepository, *mockUserServiceForSettings, *mockAppShutdowner) {
 	t.Helper()
 
 	settingRepo := newMockSettingRepository()
@@ -89,7 +93,7 @@ func setupSettingsHandler(t *testing.T) (*SettingsHandler, *mockSettingRepositor
 		func() ([]byte, error) { return []byte("test-jwt-secret"), nil },
 		logger.NewLogger(),
 		testSecretKey,
-		testRootEmail,
+		rootEmail,
 		shutdowner,
 	)
 
@@ -148,6 +152,47 @@ func TestSettingsHandler_Get_Forbidden_NonRootUser(t *testing.T) {
 
 	handler.handleGet(w, req)
 	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestSettingsHandler_Get_MultipleRootEmails(t *testing.T) {
+	handler, settingRepo, userSvc, _ := setupSettingsHandlerWithRootEmail(t, testRootEmail+",second@example.com")
+
+	ctx := context.Background()
+	_ = settingRepo.Set(ctx, "is_installed", "true")
+	_ = settingRepo.Set(ctx, "root_email", testRootEmail+",second@example.com")
+
+	// A second listed root user.
+	userSvc.users["second-root-id"] = &domain.User{
+		ID:    "second-root-id",
+		Email: "second@example.com",
+	}
+
+	t.Run("second listed root is allowed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/settings.get", nil)
+		req = reqWithUserContext(req, "second-root-id")
+		w := httptest.NewRecorder()
+
+		handler.handleGet(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("first listed root is still allowed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/settings.get", nil)
+		req = reqWithUserContext(req, "root-user-id")
+		w := httptest.NewRecorder()
+
+		handler.handleGet(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("non-listed user is forbidden", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/settings.get", nil)
+		req = reqWithUserContext(req, "other-user-id")
+		w := httptest.NewRecorder()
+
+		handler.handleGet(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
 }
 
 func TestSettingsHandler_Get_Success(t *testing.T) {

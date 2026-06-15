@@ -144,7 +144,7 @@ func (s *WorkspaceService) CreateWorkspace(ctx context.Context, id string, name 
 	}
 
 	// Only allow root user to create workspaces
-	if user.Email != s.config.RootEmail {
+	if !s.config.IsRootEmail(user.Email) {
 		s.logger.WithField("user_email", user.Email).WithField("root_email", s.config.RootEmail).Error("Non-root user attempted to create workspace")
 		return nil, &domain.ErrUnauthorized{Message: "only root user can create workspaces"}
 	}

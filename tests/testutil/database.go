@@ -314,7 +314,7 @@ func (dm *DatabaseManager) runMigrations() error {
 	testLogger := logger.NewLoggerWithLevel("info")
 
 	// Initialize system tables
-	if err := database.InitializeDatabase(dm.db, "test@example.com"); err != nil {
+	if err := database.InitializeDatabase(dm.db, []string{"test@example.com"}); err != nil {
 		return fmt.Errorf("failed to initialize system database: %w", err)
 	}
 

@@ -11,8 +11,10 @@ import (
 	"github.com/Notifuse/notifuse/internal/domain"
 )
 
-// InitializeDatabase creates all necessary database tables if they don't exist
-func InitializeDatabase(db *sql.DB, rootEmail string) error {
+// InitializeDatabase creates all necessary database tables if they don't exist.
+// A root user is created for each email in rootEmails that doesn't already have a
+// user row (idempotent), so every configured root can sign in.
+func InitializeDatabase(db *sql.DB, rootEmails []string) error {
 	// Run all table creation queries
 	for _, query := range schema.TableDefinitions {
 		if _, err := db.Exec(query); err != nil {
@@ -27,8 +29,12 @@ func InitializeDatabase(db *sql.DB, rootEmail string) error {
 		}
 	}
 
-	// Create root user if it doesn't exist
-	if rootEmail != "" {
+	// Create each root user if it doesn't already exist
+	for _, rootEmail := range rootEmails {
+		if rootEmail == "" {
+			continue
+		}
+
 		// Check if root user exists
 		var exists bool
 		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", rootEmail).Scan(&exists)
@@ -36,32 +42,34 @@ func InitializeDatabase(db *sql.DB, rootEmail string) error {
 			return fmt.Errorf("failed to check root user existence: %w", err)
 		}
 
-		if !exists {
-			// Create root user
-			rootUser := &domain.User{
-				ID:        uuid.New().String(),
-				Email:     rootEmail,
-				Name:      "Root User",
-				Type:      domain.UserTypeUser,
-				CreatedAt: time.Now().UTC(),
-				UpdatedAt: time.Now().UTC(),
-			}
+		if exists {
+			continue
+		}
 
-			query := `
-				INSERT INTO users (id, email, name, type, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, $5, $6)
-			`
-			_, err = db.Exec(query,
-				rootUser.ID,
-				rootUser.Email,
-				rootUser.Name,
-				rootUser.Type,
-				rootUser.CreatedAt,
-				rootUser.UpdatedAt,
-			)
-			if err != nil {
-				return fmt.Errorf("failed to create root user: %w", err)
-			}
+		// Create root user
+		rootUser := &domain.User{
+			ID:        uuid.New().String(),
+			Email:     rootEmail,
+			Name:      "Root User",
+			Type:      domain.UserTypeUser,
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		}
+
+		query := `
+			INSERT INTO users (id, email, name, type, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`
+		_, err = db.Exec(query,
+			rootUser.ID,
+			rootUser.Email,
+			rootUser.Name,
+			rootUser.Type,
+			rootUser.CreatedAt,
+			rootUser.UpdatedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create root user: %w", err)
 		}
 	}
 

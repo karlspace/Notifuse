@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Notifuse/notifuse/config"
 	"github.com/Notifuse/notifuse/internal/domain"
 	"github.com/Notifuse/notifuse/internal/http/middleware"
 	"github.com/Notifuse/notifuse/internal/service"
@@ -97,7 +98,7 @@ func (h *SettingsHandler) requireRootUser(w http.ResponseWriter, r *http.Request
 		return nil
 	}
 
-	if user.Email != h.rootEmail {
+	if !config.IsRootEmail(h.rootEmail, user.Email) {
 		WriteJSONError(w, "Forbidden: root user access required", http.StatusForbidden)
 		return nil
 	}

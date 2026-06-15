@@ -31,13 +31,26 @@ export interface GetCurrentUserResponse {
 }
 
 /**
- * Check if the current user is the root user
+ * Parse a ROOT_EMAIL setting into a list of non-empty emails. Entries may be
+ * separated by commas, semicolons, or whitespace (mirrors the backend parser and
+ * the tag input's separators). Case is preserved (matching is case-sensitive).
+ */
+export function parseRootEmails(setting?: string): string[] {
+  if (!setting) {
+    return []
+  }
+  return setting.split(/[\s,;]+/).filter(Boolean)
+}
+
+/**
+ * Check if the given user is one of the configured root users.
+ * ROOT_EMAIL may hold multiple comma/semicolon-separated emails.
  */
 export function isRootUser(userEmail?: string): boolean {
-  if (!userEmail || !window.ROOT_EMAIL) {
+  if (!userEmail) {
     return false
   }
-  return userEmail === window.ROOT_EMAIL
+  return parseRootEmails(window.ROOT_EMAIL).includes(userEmail)
 }
 
 export interface LogoutResponse {
