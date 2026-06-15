@@ -580,12 +580,8 @@ func (s *TransactionalNotificationService) SendNotification(
 		// Prepare message data with contact and custom data
 		notification.TrackingSettings.EnableTracking = workspace.Settings.EmailTrackingEnabled
 
-		// Use workspace CustomEndpointURL if provided, otherwise use the default API endpoint
-		if workspace.Settings.CustomEndpointURL != nil && *workspace.Settings.CustomEndpointURL != "" {
-			notification.TrackingSettings.Endpoint = *workspace.Settings.CustomEndpointURL
-		} else {
-			notification.TrackingSettings.Endpoint = s.apiEndpoint
-		}
+		// Resolve the tracking/base endpoint: custom endpoint if set, else the API endpoint.
+		notification.TrackingSettings.Endpoint = workspace.Settings.ResolveEndpoint(s.apiEndpoint)
 
 		notification.TrackingSettings.WorkspaceID = workspaceID
 		notification.TrackingSettings.MessageID = messageID
@@ -770,11 +766,8 @@ func (s *TransactionalNotificationService) TestTemplate(ctx context.Context, wor
 	// Use fixed messageID for testing
 	messageID := uuid.New().String()
 
-	// Use workspace CustomEndpointURL if provided, otherwise use the default API endpoint
-	endpoint := s.apiEndpoint
-	if workspace.Settings.CustomEndpointURL != nil && *workspace.Settings.CustomEndpointURL != "" {
-		endpoint = *workspace.Settings.CustomEndpointURL
-	}
+	// Resolve the tracking/base endpoint: custom endpoint if set, else the API endpoint.
+	endpoint := workspace.Settings.ResolveEndpoint(s.apiEndpoint)
 
 	trackingSettings := notifuse_mjml.TrackingSettings{
 		EnableTracking: true,

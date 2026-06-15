@@ -1562,7 +1562,7 @@ func TestCompileTemplate_InjectsWorkspaceData(t *testing.T) {
 
 	// Effective data is echoed back with the injected workspace object, trailing slashes trimmed.
 	require.NotNil(t, resp.TemplateData)
-	ws, ok := resp.TemplateData["workspace"].(notifuse_mjml.MapOfAny)
+	ws, ok := resp.TemplateData["workspace"].(domain.MapOfAny)
 	require.True(t, ok, "workspace object should be injected into the effective template data")
 	assert.Equal(t, "https://track.example.com", ws["base_url"], "base_url should resolve the custom endpoint with trailing slash trimmed")
 	assert.Equal(t, "https://app.example.com", ws["website_url"], "website_url should be trimmed")
@@ -1615,7 +1615,7 @@ func TestCompileTemplate_WorkspaceBaseURLFallsBackToAPIEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.TemplateData)
-	ws, ok := resp.TemplateData["workspace"].(notifuse_mjml.MapOfAny)
+	ws, ok := resp.TemplateData["workspace"].(domain.MapOfAny)
 	require.True(t, ok)
 	assert.Equal(t, "https://api.example.com", ws["base_url"], "base_url should fall back to the API endpoint, not the request endpoint")
 }
@@ -1766,7 +1766,7 @@ func TestCompileTemplate_WorkspaceLoadFailureUsesFallback(t *testing.T) {
 	require.NoError(t, err, "preview should not fail when the workspace lookup fails")
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.TemplateData)
-	ws, ok := resp.TemplateData["workspace"].(notifuse_mjml.MapOfAny)
+	ws, ok := resp.TemplateData["workspace"].(domain.MapOfAny)
 	require.True(t, ok)
 	assert.Equal(t, "https://fallback.example.com", ws["base_url"], "base_url falls back to the request endpoint")
 	assert.Equal(t, "", ws["website_url"], "website_url is empty when the workspace can't be loaded")
@@ -1807,8 +1807,8 @@ func TestCompileTemplate_FillsMissingWorkspaceKeys_MapOfAny(t *testing.T) {
 		WorkspaceID:      workspaceID,
 		VisualEditorTree: testTree,
 		TemplateData: notifuse_mjml.MapOfAny{
-			// Partial workspace as a MapOfAny (not map[string]any) — missing website_url.
-			"workspace": notifuse_mjml.MapOfAny{
+			// Partial workspace as a domain.MapOfAny (the internal-caller shape) — missing website_url.
+			"workspace": domain.MapOfAny{
 				"base_url": "https://snapshot.example.com",
 			},
 		},
@@ -1818,10 +1818,59 @@ func TestCompileTemplate_FillsMissingWorkspaceKeys_MapOfAny(t *testing.T) {
 	require.NotNil(t, resp)
 	require.True(t, resp.Success)
 
-	ws, ok := resp.TemplateData["workspace"].(notifuse_mjml.MapOfAny)
+	ws, ok := resp.TemplateData["workspace"].(domain.MapOfAny)
 	require.True(t, ok)
 	assert.Equal(t, "https://snapshot.example.com", ws["base_url"], "provided base_url must be preserved")
 	assert.Equal(t, "https://app.example.com", ws["website_url"], "missing website_url should be filled even for a MapOfAny")
+	require.NotNil(t, resp.HTML)
+	assert.Contains(t, *resp.HTML, "https://app.example.com/verify")
+}
+
+// TestCompileTemplate_InjectsOverNonMapWorkspace verifies that a workspace value which is
+// present but not a usable map (e.g. a JSON null) is replaced with the full workspace
+// object rather than silently leaving {{ workspace.* }} empty.
+func TestCompileTemplate_InjectsOverNonMapWorkspace(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAuthService := domainmocks.NewMockAuthService(ctrl)
+	mockRepo := domainmocks.NewMockTemplateRepository(ctrl)
+	mockLogger := &MockLogger{}
+	mockWorkspaceRepo := domainmocks.NewMockWorkspaceRepository(ctrl)
+	svc := service.NewTemplateService(mockRepo, mockWorkspaceRepo, mockAuthService, mockLogger, "https://api.example.com")
+
+	ctx := context.Background()
+	workspaceID := "ws_123"
+	userID := "user_abc"
+	testTree := createValidTestTree(createTestTextBlock("txt1", "Visit {{ workspace.website_url }}/verify"))
+
+	mockAuthService.EXPECT().AuthenticateUserForWorkspace(gomock.Any(), workspaceID).Return(ctx, &domain.User{ID: userID}, &domain.UserWorkspace{
+		UserID:      userID,
+		WorkspaceID: workspaceID,
+		Role:        "member",
+		Permissions: domain.UserPermissions{
+			domain.PermissionResourceTemplates: {Read: true, Write: true},
+		},
+	}, nil)
+	mockWorkspaceRepo.EXPECT().GetByID(gomock.Any(), workspaceID).Return(&domain.Workspace{
+		ID:       workspaceID,
+		Settings: domain.WorkspaceSettings{WebsiteURL: "https://app.example.com"},
+	}, nil)
+
+	resp, err := svc.CompileTemplate(ctx, domain.CompileTemplateRequest{
+		WorkspaceID:      workspaceID,
+		VisualEditorTree: testTree,
+		// "workspace" present but null — not a usable map.
+		TemplateData: notifuse_mjml.MapOfAny{"workspace": nil},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.True(t, resp.Success)
+
+	ws, ok := resp.TemplateData["workspace"].(domain.MapOfAny)
+	require.True(t, ok, "non-map workspace should be replaced with the injected object")
+	assert.Equal(t, "https://app.example.com", ws["website_url"])
 	require.NotNil(t, resp.HTML)
 	assert.Contains(t, *resp.HTML, "https://app.example.com/verify")
 }

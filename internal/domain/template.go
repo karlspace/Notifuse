@@ -961,16 +961,12 @@ func BuildTemplateData(req TemplateDataRequest) (MapOfAny, error) {
 		templateData["global_feed"] = req.Broadcast.DataFeed.GlobalFeedData
 	}
 
-	// Expose workspace URLs for composing links from relative paths. Trailing slashes are
-	// trimmed so templates can write "{{ workspace.base_url }}/path".
+	// Expose workspace URLs for composing links from relative paths.
 	//   - base_url: the tracking endpoint (resolved CustomEndpointURL, or API endpoint fallback),
 	//     used for unsubscribe/tracking/notification-center links on the Notifuse domain.
 	//   - website_url: the workspace's public Website URL, for composing application links
 	//     (e.g. "{{ workspace.website_url }}/users/verify/xxx").
-	templateData["workspace"] = MapOfAny{
-		"base_url":    strings.TrimRight(req.TrackingSettings.Endpoint, "/"),
-		"website_url": strings.TrimRight(req.WorkspaceWebsiteURL, "/"),
-	}
+	templateData["workspace"] = BuildWorkspaceTemplateVars(req.TrackingSettings.Endpoint, req.WorkspaceWebsiteURL)
 
 	// Add tracking data
 	templateData["message_id"] = req.MessageID
@@ -989,4 +985,16 @@ func BuildTemplateData(req TemplateDataRequest) (MapOfAny, error) {
 	templateData["tracking_opens_url"] = trackingPixelURL
 
 	return templateData, nil
+}
+
+// BuildWorkspaceTemplateVars builds the `workspace` template object exposing the
+// base URL and website URL for composing links from relative paths. Trailing
+// slashes are trimmed so templates can write "{{ workspace.base_url }}/path".
+// Shared by BuildTemplateData (send time) and the template compile/preview path
+// so both render identical values.
+func BuildWorkspaceTemplateVars(baseURL, websiteURL string) MapOfAny {
+	return MapOfAny{
+		"base_url":    strings.TrimRight(baseURL, "/"),
+		"website_url": strings.TrimRight(websiteURL, "/"),
+	}
 }

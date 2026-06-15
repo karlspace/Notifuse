@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [32.3] - 2026-06-01
 
 - **Improvement**: `{{ workspace.base_url }}` / `{{ workspace.website_url }}` now render in the template preview — the `/api/templates.compile` endpoint injects the workspace object server-side (filling only missing keys, so historical message snapshots are preserved), so any API consumer gets it, not just the console, and the Preview tab no longer renders `website_url` as empty (#342).
+- **Refactor**: Extracted shared `WorkspaceSettings.ResolveEndpoint` and `BuildWorkspaceTemplateVars` helpers, replacing ~8 duplicated copies of the tracking-endpoint resolution and `workspace` template-object construction across the send and preview paths.
 
 ## [32.2] - 2026-05-31
 

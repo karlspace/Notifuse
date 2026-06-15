@@ -957,11 +957,8 @@ func (s *BroadcastService) SendToIndividual(ctx context.Context, request *domain
 
 	messageID := uuid.New().String()
 
-	// Use workspace CustomEndpointURL if provided, otherwise use the default API endpoint
-	endpoint := s.apiEndpoint
-	if workspace.Settings.CustomEndpointURL != nil && *workspace.Settings.CustomEndpointURL != "" {
-		endpoint = *workspace.Settings.CustomEndpointURL
-	}
+	// Resolve the tracking/base endpoint: custom endpoint if set, else the API endpoint.
+	endpoint := workspace.Settings.ResolveEndpoint(s.apiEndpoint)
 
 	trackingSettings := notifuse_mjml.TrackingSettings{
 		Endpoint:       endpoint,

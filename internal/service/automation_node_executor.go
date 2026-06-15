@@ -293,11 +293,8 @@ func (e *EmailNodeExecutor) Execute(ctx context.Context, params NodeExecutionPar
 	// 5. Generate message ID
 	messageID := fmt.Sprintf("%s_%s", params.WorkspaceID, uuid.New().String())
 
-	// 6. Setup tracking settings
-	endpoint := e.apiEndpoint
-	if workspace.Settings.CustomEndpointURL != nil && *workspace.Settings.CustomEndpointURL != "" {
-		endpoint = *workspace.Settings.CustomEndpointURL
-	}
+	// 6. Setup tracking settings — custom endpoint if set, else the API endpoint.
+	endpoint := workspace.Settings.ResolveEndpoint(e.apiEndpoint)
 
 	trackingSettings := notifuse_mjml.TrackingSettings{
 		Endpoint:       endpoint,

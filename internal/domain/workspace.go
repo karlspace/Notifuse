@@ -447,6 +447,20 @@ func (ws *WorkspaceSettings) Validate(passphrase string) error {
 	return nil
 }
 
+// ResolveEndpoint returns the base endpoint used for tracking links, the
+// notification center, and template URL composition: the configured Custom
+// Endpoint URL when set, otherwise the provided default API endpoint.
+//
+// Note: this falls back to the API endpoint. The blog/public-site origin uses a
+// different fallback (Custom Endpoint URL → Website URL); do not use this method
+// for blog URL composition.
+func (ws *WorkspaceSettings) ResolveEndpoint(apiEndpoint string) string {
+	if ws.CustomEndpointURL != nil && *ws.CustomEndpointURL != "" {
+		return *ws.CustomEndpointURL
+	}
+	return apiEndpoint
+}
+
 // Value implements the driver.Valuer interface for database serialization
 func (b WorkspaceSettings) Value() (driver.Value, error) {
 	return json.Marshal(b)
