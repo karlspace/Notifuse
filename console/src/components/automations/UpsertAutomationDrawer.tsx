@@ -15,7 +15,7 @@ import {
 import { InfoCircleOutlined } from '@ant-design/icons'
 import { Undo2, Redo2 } from 'lucide-react'
 import { useLingui } from '@lingui/react/macro'
-import { type Automation, INBOUND_REPLY_PROVIDER_KINDS } from '../../services/api/automation'
+import { type Automation, supportsInboundReplies } from '../../services/api/automation'
 import type { Workspace, Template } from '../../services/api/types'
 import type { List } from '../../services/api/list'
 import type { Segment } from '../../services/api/segment'
@@ -59,10 +59,12 @@ function DrawerContent({ onCloseDrawer }: { onCloseDrawer: () => void }) {
     redo
   } = useAutomation()
 
-  // "Exit on reply" needs an email provider that can ingest inbound replies. Gate the
-  // toggle on the workspace having at least one such integration (more ESPs coming).
+  // "Exit on reply" needs an email provider that can ingest inbound replies. Gate the toggle
+  // on the workspace having at least one such integration. For SES this is also region-aware:
+  // inbound only works in receiving-capable regions, so a sending-only-region SES integration
+  // does not enable the toggle (it would never fire).
   const hasInboundIntegration = (workspace?.integrations || []).some((i) =>
-    INBOUND_REPLY_PROVIDER_KINDS.includes(i.email_provider.kind)
+    supportsInboundReplies(i.email_provider)
   )
 
   const { modal } = App.useApp()
@@ -208,7 +210,7 @@ function DrawerContent({ onCloseDrawer }: { onCloseDrawer: () => void }) {
                   title={
                     hasInboundIntegration
                       ? t`Stops this automation for a contact as soon as they reply to one of its emails. This requires inbound reply forwarding to be configured at your email provider (ESP): replies to your sending domain must be routed to the provider, which forwards them to Notifuse. Without that setup, replies aren't detected and the sequence won't stop.`
-                      : t`Available once you connect an email provider that supports inbound replies (currently Mailgun — more providers coming soon). It stops this automation for a contact as soon as they reply to one of its emails.`
+                      : t`Available once you connect an email provider that supports inbound replies (currently Mailgun and Amazon SES — more providers coming soon). It stops this automation for a contact as soon as they reply to one of its emails.`
                   }
                 >
                   <InfoCircleOutlined style={{ color: '#8c8c8c' }} />

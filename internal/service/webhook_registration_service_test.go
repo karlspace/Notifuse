@@ -242,10 +242,13 @@ func TestWebhookRegistrationService_RegisterWebhooks_RegistersInboundRoute(t *te
 			Integrations: domain.Integrations{{ID: integrationID, EmailProvider: domain.EmailProvider{Kind: domain.EmailProviderKindMailgun}}},
 		}
 		mockWorkspaceRepo.EXPECT().GetByID(gomock.Any(), workspaceID).Return(workspace, nil)
+		mockLogger := pkgmocks.NewMockLogger(ctrl)
+		mockLogger.EXPECT().WithField(gomock.Any(), gomock.Any()).Return(mockLogger).AnyTimes()
+		mockLogger.EXPECT().Warn(gomock.Any()).AnyTimes()
 		return &WebhookRegistrationService{
 			workspaceRepo:    mockWorkspaceRepo,
 			authService:      mockAuthService,
-			logger:           pkgmocks.NewMockLogger(ctrl),
+			logger:           mockLogger,
 			apiEndpoint:      apiEndpoint,
 			webhookProviders: map[domain.EmailProviderKind]domain.WebhookProvider{domain.EmailProviderKindMailgun: provider},
 		}
@@ -266,7 +269,7 @@ func TestWebhookRegistrationService_RegisterWebhooks_RegistersInboundRoute(t *te
 		assert.Equal(t, domain.GenerateInboundWebhookURL(apiEndpoint, workspaceID, integrationID), fake.gotInboundURL)
 	})
 
-	t.Run("inbound route failure fails registration", func(t *testing.T) {
+	t.Run("inbound route failure does NOT fail the primary registration (best-effort)", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 		fake := &fakeInboundProvider{status: &domain.WebhookRegistrationStatus{IsRegistered: true}, ensureErr: errors.New("routes API down")}
@@ -274,9 +277,46 @@ func TestWebhookRegistrationService_RegisterWebhooks_RegistersInboundRoute(t *te
 
 		result, err := svc.RegisterWebhooks(ctx, workspaceID, config)
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "inbound reply route")
-		assert.Nil(t, result)
+		// Inbound provisioning uses a broader permission surface; its failure must not roll back
+		// the already-succeeded delivery/bounce/complaint registration. It is logged, not fatal.
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		assert.True(t, result.IsRegistered)
+		assert.Equal(t, 1, fake.ensureCallCount, "inbound route registration was attempted")
+	})
+}
+
+func TestWebhookRegistrationService_persistSESInboundTopicARN(t *testing.T) {
+	ctx := context.Background()
+	newWS := func() *domain.Workspace {
+		return &domain.Workspace{ID: "ws-1", Integrations: domain.Integrations{
+			{ID: "int-1", EmailProvider: domain.EmailProvider{Kind: domain.EmailProviderKindSES, SES: &domain.AmazonSESSettings{}}},
+		}}
+	}
+
+	t.Run("persists the ARN onto the SES integration", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		mockRepo := mocks.NewMockWorkspaceRepository(ctrl)
+		mockRepo.EXPECT().GetByID(gomock.Any(), "ws-1").Return(newWS(), nil)
+		mockRepo.EXPECT().Update(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, w *domain.Workspace) error {
+			assert.Equal(t, "arn:topic", w.GetIntegrationByID("int-1").EmailProvider.SES.InboundTopicARN)
+			return nil
+		})
+		svc := &WebhookRegistrationService{workspaceRepo: mockRepo}
+		require.NoError(t, svc.persistSESInboundTopicARN(ctx, "ws-1", "int-1", "arn:topic"))
+	})
+
+	t.Run("no-op when the ARN is already persisted", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		mockRepo := mocks.NewMockWorkspaceRepository(ctrl)
+		ws := newWS()
+		ws.Integrations[0].EmailProvider.SES.InboundTopicARN = "arn:topic"
+		mockRepo.EXPECT().GetByID(gomock.Any(), "ws-1").Return(ws, nil)
+		// No Update expected — already in sync.
+		svc := &WebhookRegistrationService{workspaceRepo: mockRepo}
+		require.NoError(t, svc.persistSESInboundTopicARN(ctx, "ws-1", "int-1", "arn:topic"))
 	})
 }
 

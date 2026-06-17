@@ -45,3 +45,52 @@ func TestProviderSetsOwnMessageID(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderCapturesMessageID(t *testing.T) {
+	if !ProviderCapturesMessageID(EmailProviderKindSES) {
+		t.Error("ProviderCapturesMessageID(SES) = false, want true")
+	}
+	// Mailgun sets its own id (not capture); others not wired.
+	for _, k := range []EmailProviderKind{
+		EmailProviderKindMailgun, EmailProviderKindSendGrid, EmailProviderKindSMTP,
+	} {
+		if ProviderCapturesMessageID(k) {
+			t.Errorf("ProviderCapturesMessageID(%s) = true, want false", k)
+		}
+	}
+	// A set_own and a capture provider must never both claim the same kind.
+	if ProviderSetsOwnMessageID(EmailProviderKindSES) {
+		t.Error("SES must not be a set_own provider")
+	}
+}
+
+func TestSESStoredMessageID(t *testing.T) {
+	// We store the bare, host-independent local part SES returns (NOT a reconstructed host),
+	// because AWS does not pin the Message-ID host.
+	if got := SESStoredMessageID("  0000018f-abcd  "); got != "0000018f-abcd" {
+		t.Errorf("SESStoredMessageID = %q, want bare trimmed local part", got)
+	}
+}
+
+func TestSESReplyCandidate(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		// Any amazonses.com host variant resolves to the same local part.
+		{"0000018f-abcd@email.amazonses.com", "0000018f-abcd"},
+		{"0000018f-abcd@mail.amazonses.com", "0000018f-abcd"},
+		{"0000018f-abcd@us-east-1.amazonses.com", "0000018f-abcd"},
+		{"0000018f-abcd@EMAIL.AMAZONSES.COM", "0000018f-abcd"}, // case-insensitive
+		// Non-SES Message-IDs are left alone (no false local-part match).
+		{"uuid-1@mg.example.com", ""},
+		{"uuid-1@example.com", ""},
+		{"not-amazonses.com.evil.com", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := SESReplyCandidate(c.in); got != c.want {
+			t.Errorf("SESReplyCandidate(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

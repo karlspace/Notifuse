@@ -514,6 +514,7 @@ func (a *App) InitServices() error {
 		SMTPFromEmail:           smtpFromEmail,
 		SMTPFromName:            smtpFromName,
 		SMTPUseTLS:              smtpUseTLS,
+		SMTPEHLOHostname:        a.config.EnvValues.SMTPEHLOHostname,
 		SMTPBridgeEnabled:       smtpBridgeEnabled,
 		SMTPBridgeDomain:        smtpBridgeDomain,
 		SMTPBridgePort:          smtpBridgePort,

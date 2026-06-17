@@ -39,6 +39,7 @@ import {
 import { workspaceService } from '../../services/api/workspace'
 import { emailService } from '../../services/api/email'
 import { listsApi } from '../../services/api/list'
+import { INBOUND_REPLY_PROVIDER_KINDS } from '../../services/api/automation'
 import {
   faCheck,
   faChevronDown,
@@ -192,16 +193,24 @@ const EmailIntegration = ({
   }
 
   // Render webhook status
-  // Inbound (reply) forwarding status — Mailgun only. The "Register Webhooks" action also
-  // creates a Mailgun Route that forwards replies to Notifuse (for automation Exit-on-reply);
-  // surface whether that route exists, plus the manual MX-records prerequisite.
+  // Inbound (reply) forwarding status — for providers that support stop-on-reply. The
+  // "Register Webhooks" action also creates the provider-side route (a Mailgun Route, or an
+  // SES receipt rule + SNS topic) that forwards replies to Notifuse (for automation
+  // Exit-on-reply); surface whether that route exists, plus the manual MX-records prerequisite.
   const renderInboundReplyStatus = () => {
-    if (provider.kind !== 'mailgun' || !webhookStatus) return null
+    if (!INBOUND_REPLY_PROVIDER_KINDS.includes(provider.kind) || !webhookStatus) return null
     const inboundRegistered = webhookStatus.provider_details?.inbound_registered === true
+
+    // Provider-specific MX target the operator must point their domain at.
+    const mxTarget =
+      provider.kind === 'ses'
+        ? t`Amazon SES (inbound-smtp.<region>.amazonaws.com, in a region that supports email receiving)`
+        : t`Mailgun (mxa.mailgun.org / mxb.mailgun.org)`
+
     return (
       <div className="mb-2">
         <Tooltip
-          title={t`Forwards inbound replies to Notifuse so automations can stop when a contact replies (Exit on reply). Registering webhooks creates the Mailgun route; you must also point your domain's MX records at Mailgun.`}
+          title={t`Forwards inbound replies to Notifuse so automations can stop when a contact replies (Exit on reply). Registering webhooks creates the provider-side route; you must also point your domain's MX records at your email provider.`}
         >
           <Tag bordered={false} color={inboundRegistered ? 'green' : 'orange'}>
             {inboundRegistered ? (
@@ -214,8 +223,8 @@ const EmailIntegration = ({
         </Tooltip>
         <div className="text-xs text-gray-400 mt-1">
           {inboundRegistered
-            ? t`Reply forwarding route is set up. Inbound replies also require your domain's MX records to point at Mailgun.`
-            : t`Click Register Webhooks to set up reply forwarding, then point your domain's MX records at Mailgun.`}
+            ? t`Reply forwarding is set up. Inbound replies also require your domain's MX records to point at ${mxTarget}.`
+            : t`Click Register Webhooks to set up reply forwarding, then point your domain's MX records at ${mxTarget}.`}
         </div>
       </div>
     )

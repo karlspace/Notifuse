@@ -1269,6 +1269,71 @@ func TestEmailQueueWorker_ProcessEntry_SMTPMessageIDForReplyMatching(t *testing.
 	}
 }
 
+// TestEmailQueueWorker_ProcessEntry_SESCapturesMessageID covers the capture strategy: SES
+// overwrites the Message-ID and returns its own, so (unlike set_own providers) there is no
+// pre-send upsert — the worker must hand SES a capture pointer, then store the returned id
+// reconstructed into the recipient-visible RFC Message-ID on the post-send upsert.
+func TestEmailQueueWorker_ProcessEntry_SESCapturesMessageID(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockQueueRepo := mocks.NewMockEmailQueueRepository(ctrl)
+	mockWorkspaceRepo := mocks.NewMockWorkspaceRepository(ctrl)
+	mockEmailService := mocks.NewMockEmailServiceInterface(ctrl)
+	mockMessageHistoryRepo := mocks.NewMockMessageHistoryRepository(ctrl)
+	mockLogger := pkgmocks.NewMockLogger(ctrl)
+	mockLogger.EXPECT().WithFields(gomock.Any()).Return(mockLogger).AnyTimes()
+	mockLogger.EXPECT().Debug(gomock.Any()).AnyTimes()
+
+	workspaceID, integrationID, entryID := "ws-1", "int-1", "entry-1"
+	workspace := &domain.Workspace{
+		ID:       workspaceID,
+		Settings: domain.WorkspaceSettings{SecretKey: "secret"},
+		Integrations: []domain.Integration{{
+			ID:            integrationID,
+			EmailProvider: domain.EmailProvider{Kind: domain.EmailProviderKindSES, RateLimitPerMinute: 100},
+		}},
+	}
+	entry := &domain.EmailQueueEntry{
+		ID: entryID, Status: domain.EmailQueueStatusPending,
+		SourceType: domain.EmailQueueSourceAutomation, SourceID: "auto-1",
+		IntegrationID: integrationID, ProviderKind: domain.EmailProviderKindSES,
+		ContactEmail: "jane@contact.com", MessageID: "msg-1", TemplateID: "tpl-1",
+		Payload: domain.EmailQueuePayload{
+			FromAddress: "hello@example.com", FromName: "Hello", Subject: "Hi",
+			HTMLContent: "<p>Hi</p>", RateLimitPerMinute: 100, TemplateVersion: 1,
+		},
+		MaxAttempts: 3,
+	}
+
+	mockQueueRepo.EXPECT().MarkAsProcessing(gomock.Any(), workspaceID, entryID).Return(nil)
+	// Simulate the SES provider writing its returned MessageId into the capture pointer.
+	mockEmailService.EXPECT().SendEmail(gomock.Any(), gomock.Any(), true).
+		DoAndReturn(func(_ context.Context, req domain.SendEmailProviderRequest, _ bool) error {
+			if assert.NotNil(t, req.CapturedMessageID, "worker must provide a capture pointer for SES") {
+				*req.CapturedMessageID = "ses-returned-id"
+			}
+			return nil
+		})
+	var stored *string
+	mockMessageHistoryRepo.EXPECT().Upsert(gomock.Any(), workspaceID, gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, msg *domain.MessageHistory) error {
+			stored = msg.SMTPMessageID
+			return nil
+		}).AnyTimes()
+	mockQueueRepo.EXPECT().MarkAsSent(gomock.Any(), workspaceID, entryID).Return(nil)
+
+	worker := NewEmailQueueWorker(mockQueueRepo, mockWorkspaceRepo, mockEmailService, mockMessageHistoryRepo, DefaultWorkerConfig(), mockLogger)
+	worker.ctx = context.Background()
+	worker.processEntry(workspace, entry)
+
+	if assert.NotNil(t, stored, "SES automation send must store smtp_message_id post-send") {
+		// Stored bare (host-independent): SES does not contractually pin the Message-ID host,
+		// so we key matching off the unique local part SES returns.
+		assert.Equal(t, "ses-returned-id", *stored)
+	}
+}
+
 func TestEmailQueueWorker_GetMinEmailRateLimit(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

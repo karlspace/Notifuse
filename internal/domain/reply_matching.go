@@ -1,6 +1,9 @@
 package domain
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // RFCMessageIDValue returns the canonical message-id value WITHOUT angle brackets
 // ("messageID@domain", domain taken from the From address). This is what we store
@@ -36,4 +39,42 @@ func ProviderSetsOwnMessageID(kind EmailProviderKind) bool {
 	default:
 		return false
 	}
+}
+
+// amazonSESMessageIDHost matches the host of an SES-stamped Message-ID. SES overwrites the
+// Message-ID with "<localpart@<sub>.amazonses.com>", but the exact subdomain is NOT
+// contractually pinned by AWS — public reports show "email.amazonses.com",
+// "mail.amazonses.com", and region-qualified variants. So matching keys off the globally
+// unique local part (the value SES returns and we store), not the host. Case-insensitive.
+var amazonSESMessageIDHost = regexp.MustCompile(`(?i)@[a-z0-9.-]*amazonses\.com$`)
+
+// SESStoredMessageID returns the value to store as message_history.smtp_message_id for a
+// captured SES MessageId. SES overwrites the Message-ID header and returns only the
+// (globally unique) local part, so we store that bare local part rather than reconstruct a
+// host that AWS may change. A reply's In-Reply-To echoes "<localpart@<sub>.amazonses.com>";
+// SESReplyCandidate strips the host back to this local part at match time, so matching is
+// independent of the exact SES host.
+func SESStoredMessageID(returnedMessageID string) string {
+	return strings.TrimSpace(returnedMessageID)
+}
+
+// SESReplyCandidate returns the host-independent match key for a bracket-stripped
+// In-Reply-To / References value: when the value is an "...@<sub>.amazonses.com" address it
+// returns the local part (which equals the SES-returned MessageId we stored); otherwise "".
+// Used to recover the match when SES's Message-ID host differs from any single assumption.
+func SESReplyCandidate(messageID string) string {
+	if !amazonSESMessageIDHost.MatchString(messageID) {
+		return ""
+	}
+	if at := strings.IndexByte(messageID, '@'); at > 0 {
+		return messageID[:at]
+	}
+	return ""
+}
+
+// ProviderCapturesMessageID reports whether the provider OVERWRITES the Message-ID at send
+// time and returns its own (the "capture" strategy): we cannot set our own header, so we
+// capture the provider-returned MessageId and store the reconstructed value. Currently SES.
+func ProviderCapturesMessageID(kind EmailProviderKind) bool {
+	return kind == EmailProviderKindSES
 }

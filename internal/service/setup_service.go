@@ -139,6 +139,13 @@ func (s *SetupService) GetConfigurationStatus() *ConfigurationStatus {
 	}
 }
 
+// GetEnvConfig returns the environment-variable configuration the service was
+// constructed with (may be nil). Used to surface live env-overridden values that
+// differ from the values persisted to the database at install time.
+func (s *SetupService) GetEnvConfig() *EnvironmentConfig {
+	return s.envConfig
+}
+
 // GetEnvOverrides returns a map of setting keys that are overridden by environment variables.
 // A key is present (true) if the corresponding env var has a non-empty/non-zero value.
 func (s *SetupService) GetEnvOverrides() map[string]bool {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Notifuse/notifuse/internal/domain"
 	"github.com/Notifuse/notifuse/pkg/logger"
+	"github.com/Notifuse/notifuse/pkg/safehttpclient"
 	"github.com/Notifuse/notifuse/pkg/tracing"
 	"github.com/google/uuid"
 )
@@ -48,6 +50,9 @@ func NewInboundWebhookEventService(
 		automationRepo:     automationRepo,
 		replyParsers: map[domain.EmailProviderKind]domain.ReplyParser{
 			domain.EmailProviderKindMailgun: &MailgunReplyParser{},
+			// SES delivers replies via SNS (signed); the parser needs an SSRF-safe client
+			// to fetch the signing cert and confirm the subscription.
+			domain.EmailProviderKindSES: NewSESReplyParser(safehttpclient.New()),
 		},
 	}
 }
@@ -85,8 +90,16 @@ func (s *InboundWebhookEventService) ProcessInboundReply(ctx context.Context, wo
 		return fmt.Errorf("%q: %w", integration.EmailProvider.Kind, domain.ErrInboundProviderUnsupported)
 	}
 
-	// Authenticate via the provider's native signature (e.g. Mailgun HMAC).
+	// Authenticate via the provider's native signature (e.g. Mailgun HMAC, SNS RSA).
 	if err := parser.Verify(req, &integration); err != nil {
+		// A provider control message (e.g. an SNS subscription confirmation) is handled by
+		// the parser itself — there is no reply to ingest; acknowledge with 200.
+		if errors.Is(err, domain.ErrInboundControlMessage) {
+			s.logger.WithField("workspace_id", workspaceID).
+				WithField("integration_id", integrationID).
+				Info("Acknowledged inbound provider control message")
+			return nil
+		}
 		return fmt.Errorf("inbound reply verification failed: %w", err)
 	}
 
@@ -107,6 +120,21 @@ func (s *InboundWebhookEventService) ProcessInboundReply(ctx context.Context, wo
 		return err // real error → non-2xx → provider retries
 	}
 	if contactEmail == "" {
+		// An SES-style In-Reply-To that matched no stored send is logged at WARN so the miss is
+		// observable. It is almost always a reply to mail we didn't send/track (a transactional
+		// email, or a pruned history row), but it could in theory be the narrow send→store race
+		// for capture providers: SES returns the Message-ID only AFTER send, so the smtp_message_id
+		// is persisted post-dispatch. In practice the inbound SNS delivery latency (seconds) far
+		// exceeds that store latency (ms), so the row is present by the time a reply arrives. We
+		// deliberately do NOT return 5xx here: that would make SNS retry every genuinely-unknown
+		// reply on its full schedule until it dead-letters.
+		if replyHasSESShapedThreading(reply) {
+			s.logger.WithField("workspace_id", workspaceID).
+				WithField("sender", reply.FromEmail).
+				WithField("in_reply_to", reply.InReplyTo).
+				Warn("Inbound SES-threaded reply matched no stored send")
+			return nil
+		}
 		s.logger.WithField("workspace_id", workspaceID).
 			WithField("sender", reply.FromEmail).
 			Info("Ignoring inbound reply from unknown contact")
@@ -163,6 +191,20 @@ func (s *InboundWebhookEventService) ProcessInboundReply(ctx context.Context, wo
 	return nil
 }
 
+// replyHasSESShapedThreading reports whether the reply threads to an SES-stamped Message-ID
+// (an "...@*.amazonses.com" In-Reply-To/References), used to flag a capture-provider miss.
+func replyHasSESShapedThreading(reply *domain.InboundReply) bool {
+	if domain.SESReplyCandidate(reply.InReplyTo) != "" {
+		return true
+	}
+	for _, ref := range reply.References {
+		if domain.SESReplyCandidate(ref) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // matchReply resolves the contact and the exact automation for a reply, strictly via
 // RFC threading headers (In-Reply-To / References) matched against the Message-ID we
 // stored at send time. Returns an empty contactEmail when no stored send is referenced.
@@ -174,11 +216,21 @@ func (s *InboundWebhookEventService) ProcessInboundReply(ctx context.Context, wo
 // header-independent but send-precise signal (a per-send Reply-To/VERP token, or a body
 // watermark) so the exit stays scoped to the exact send — not yet implemented.
 func (s *InboundWebhookEventService) matchReply(ctx context.Context, workspaceID string, reply *domain.InboundReply) (string, *string, error) {
-	candidates := append([]string{reply.InReplyTo}, reply.References...)
-	for _, mid := range candidates {
+	threaded := append([]string{reply.InReplyTo}, reply.References...)
+	candidates := make([]string, 0, len(threaded)*2)
+	for _, mid := range threaded {
 		if mid == "" {
 			continue
 		}
+		candidates = append(candidates, mid)
+		// SES overwrites the Message-ID with "<localpart@<sub>.amazonses.com>" and the host
+		// it uses is not contractually stable, so also try the host-independent local part
+		// (the bare MessageId we stored). No-op for non-SES threading headers.
+		if local := domain.SESReplyCandidate(mid); local != "" && local != mid {
+			candidates = append(candidates, local)
+		}
+	}
+	for _, mid := range candidates {
 		mh, err := s.messageHistoryRepo.GetBySMTPMessageID(ctx, workspaceID, mid)
 		if err != nil {
 			return "", nil, fmt.Errorf("failed to look up message by smtp_message_id: %w", err)

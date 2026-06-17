@@ -16,6 +16,10 @@ import (
 var (
 	ErrInboundIntegrationNotFound = errors.New("inbound: integration not found")
 	ErrInboundProviderUnsupported = errors.New("inbound: provider does not support inbound replies")
+	// ErrInboundControlMessage signals that a ReplyParser handled a provider control
+	// message (e.g. an SNS subscription confirmation) rather than a real reply. The caller
+	// acknowledges with 200 and ingests nothing.
+	ErrInboundControlMessage = errors.New("inbound: provider control message (no reply)")
 )
 
 //go:generate mockgen -destination mocks/mock_inbound_webhook_event_repository.go -package mocks github.com/Notifuse/notifuse/internal/domain InboundWebhookEventRepository

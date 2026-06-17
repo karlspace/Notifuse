@@ -330,6 +330,14 @@ func (w *EmailQueueWorker) processEntry(workspace *domain.Workspace, entry *doma
 		&integration.EmailProvider,
 	)
 
+	// Stop-on-reply for capture providers (e.g. SES, which overwrites the Message-ID): give
+	// the send a place to write the provider-returned MessageId so we can store the
+	// recipient-visible Message-ID post-send. Only the captured value is meaningful here.
+	var capturedMessageID string
+	if entry.SourceType == domain.EmailQueueSourceAutomation && domain.ProviderCapturesMessageID(entry.ProviderKind) {
+		request.CapturedMessageID = &capturedMessageID
+	}
+
 	// Stop-on-reply just-in-time guard: for automation sends flagged with a
 	// contact_automation_id, re-check the journey is still active right before
 	// sending. If a reply exited it after this email was enqueued, cancel the send.
@@ -366,7 +374,7 @@ func (w *EmailQueueWorker) processEntry(workspace *domain.Workspace, entry *doma
 	// window before the post-send upsert. The post-send upsert below preserves the value
 	// (ON CONFLICT COALESCE). Only matters for automation sends where we set the Message-ID.
 	if entry.SourceType == domain.EmailQueueSourceAutomation && domain.ProviderSetsOwnMessageID(entry.ProviderKind) {
-		w.upsertMessageHistory(w.ctx, workspace.ID, workspace.Settings.SecretKey, entry, nil)
+		w.upsertMessageHistory(w.ctx, workspace.ID, workspace.Settings.SecretKey, entry, "", nil)
 	}
 
 	// Send the email
@@ -404,8 +412,9 @@ func (w *EmailQueueWorker) processEntry(workspace *domain.Workspace, entry *doma
 		return
 	}
 
-	// Upsert message history (success - clears any previous failure)
-	w.upsertMessageHistory(w.ctx, workspace.ID, workspace.Settings.SecretKey, entry, nil)
+	// Upsert message history (success - clears any previous failure). capturedMessageID
+	// carries the SES-returned Message-ID for the reply-matching row (empty for others).
+	w.upsertMessageHistory(w.ctx, workspace.ID, workspace.Settings.SecretKey, entry, capturedMessageID, nil)
 
 	w.logger.WithFields(map[string]interface{}{
 		"entry_id":     entry.ID,
@@ -447,8 +456,8 @@ func (w *EmailQueueWorker) handleError(workspace *domain.Workspace, entry *domai
 	}
 	w.logger.WithFields(logFields).Warn("Failed to send email")
 
-	// Upsert message history with failure info
-	w.upsertMessageHistory(w.ctx, workspace.ID, workspace.Settings.SecretKey, entry, sendErr)
+	// Upsert message history with failure info (no captured Message-ID on a failed send).
+	w.upsertMessageHistory(w.ctx, workspace.ID, workspace.Settings.SecretKey, entry, "", sendErr)
 
 	if isPermanent {
 		// Permanent failure - delete the queue entry
@@ -496,6 +505,7 @@ func (w *EmailQueueWorker) upsertMessageHistory(
 	workspaceID string,
 	secretKey string,
 	entry *domain.EmailQueueEntry,
+	capturedMessageID string,
 	sendErr error,
 ) {
 	now := time.Now().UTC()
@@ -528,8 +538,14 @@ func (w *EmailQueueWorker) upsertMessageHistory(
 	// what lets a reply to a non-exit_on_reply automation NOT wrongly exit a
 	// different exit_on_reply automation for the same contact.
 	if entry.SourceType == domain.EmailQueueSourceAutomation && domain.ProviderSetsOwnMessageID(entry.ProviderKind) {
-		// Store the bracket-free message-id value (matches a reply's parsed In-Reply-To).
+		// set_own (e.g. Mailgun): store the bracket-free value we set as the header.
 		smtpMessageID := domain.RFCMessageIDValue(entry.MessageID, entry.Payload.FromAddress)
+		message.SMTPMessageID = &smtpMessageID
+	} else if entry.SourceType == domain.EmailQueueSourceAutomation && domain.ProviderCapturesMessageID(entry.ProviderKind) && capturedMessageID != "" {
+		// capture (e.g. SES overwrites the Message-ID): store the provider-returned id,
+		// reconstructed into the recipient-visible RFC Message-ID value. Only known
+		// post-send, so this never runs on the pre-send upsert.
+		smtpMessageID := domain.SESStoredMessageID(capturedMessageID)
 		message.SMTPMessageID = &smtpMessageID
 	}
 

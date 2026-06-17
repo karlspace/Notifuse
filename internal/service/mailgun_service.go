@@ -582,12 +582,8 @@ func (s *MailgunService) GetWebhookStatus(
 		s.logger.WithField("error", rErr.Error()).Warn("Failed to list Mailgun routes for inbound status")
 	} else {
 		for _, r := range routes {
-			for _, action := range r.Actions {
-				if strings.Contains(action, "/webhooks/email/inbound") &&
-					strings.Contains(action, "workspace_id="+workspaceID) &&
-					strings.Contains(action, "integration_id="+integrationID) {
-					inboundRegistered = true
-				}
+			if isOwnedInboundReplyRoute(r.Actions, workspaceID, integrationID) {
+				inboundRegistered = true
 			}
 		}
 	}
@@ -665,6 +661,27 @@ func (s *MailgunService) UnregisterWebhooks(
 		} else {
 			s.logger.WithField("webhook_id", eventType).
 				Info("Removed Notifuse URL from Mailgun webhook, preserved other consumers")
+		}
+	}
+
+	// Also remove our inbound (reply) route(s), so unregistering fully reverses what
+	// "Register Webhooks" set up (matching what EnsureInboundRoute created). Best-effort,
+	// consistent with the event-webhook removal above; only our own routes are touched.
+	if routes, rErr := s.listRoutes(ctx, *providerConfig.Mailgun); rErr != nil {
+		s.logger.WithField("error", rErr.Error()).Error("Failed to list Mailgun routes while unregistering")
+		lastError = rErr
+	} else {
+		for _, r := range routes {
+			if !isOwnedInboundReplyRoute(r.Actions, workspaceID, integrationID) {
+				continue
+			}
+			if err := s.deleteRoute(ctx, *providerConfig.Mailgun, r.ID); err != nil {
+				s.logger.WithField("route_id", r.ID).
+					Error(fmt.Sprintf("Failed to delete Mailgun inbound route: %v", err))
+				lastError = err
+			} else {
+				s.logger.WithField("route_id", r.ID).Info("Deleted Mailgun inbound route")
+			}
 		}
 	}
 
@@ -981,7 +998,10 @@ const mailgunRoutesPageSize = 1000
 func (s *MailgunService) listRoutes(ctx context.Context, config domain.MailgunSettings) ([]mailgunRoute, error) {
 	base := mailgunAPIBase(config.Region)
 	all := []mailgunRoute{}
-	for skip := 0; ; skip += mailgunRoutesPageSize {
+	// page is a hard guard against a misbehaving API; real pagination ends via the
+	// total_count / empty-page checks below well before this.
+	skip := 0
+	for page := 0; page < 10000; page++ {
 		apiURL := fmt.Sprintf("%s/routes?skip=%d&limit=%d", base, skip, mailgunRoutesPageSize)
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
@@ -1013,8 +1033,13 @@ func (s *MailgunService) listRoutes(ctx context.Context, config domain.MailgunSe
 		}
 
 		all = append(all, response.Items...)
-		// Stop when this page was not full, or we've reached the reported total.
-		if len(response.Items) < mailgunRoutesPageSize || (response.TotalCount > 0 && len(all) >= response.TotalCount) {
+		// Advance by the number actually returned — Mailgun may return fewer than the
+		// requested limit — and stop on an empty page or once the reported total is reached.
+		if len(response.Items) == 0 {
+			break
+		}
+		skip += len(response.Items)
+		if response.TotalCount > 0 && len(all) >= response.TotalCount {
 			break
 		}
 	}
@@ -1083,6 +1108,43 @@ func (s *MailgunService) EnsureInboundRoute(ctx context.Context, providerConfig 
 		body, _ := io.ReadAll(resp.Body)
 		s.logger.Error(fmt.Sprintf("Mailgun route create returned non-OK status %d: %s", resp.StatusCode, string(body)))
 		return fmt.Errorf("API returned non-OK status code %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// isOwnedInboundReplyRoute reports whether any of a route's actions forward inbound mail to
+// this integration's inbound endpoint. Matched host-independently by the inbound path plus
+// the workspace/integration IDs in the forward() action, so it works regardless of base URL.
+func isOwnedInboundReplyRoute(actions []string, workspaceID, integrationID string) bool {
+	for _, action := range actions {
+		if strings.Contains(action, "/webhooks/email/inbound") &&
+			strings.Contains(action, "workspace_id="+workspaceID) &&
+			strings.Contains(action, "integration_id="+integrationID) {
+			return true
+		}
+	}
+	return false
+}
+
+// deleteRoute removes a single Mailgun Route by id (DELETE /v3/routes/{id}).
+func (s *MailgunService) deleteRoute(ctx context.Context, config domain.MailgunSettings, routeID string) error {
+	apiURL := fmt.Sprintf("%s/routes/%s", mailgunAPIBase(config.Region), routeID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, apiURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.SetBasicAuth("api", config.APIKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API returned non-OK status code %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
 }

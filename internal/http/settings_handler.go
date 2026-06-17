@@ -144,18 +144,75 @@ func (h *SettingsHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 		SMTPBridgePort:    sysConfig.SMTPBridgePort,
 	}
 
-	// Mask sensitive fields
-	if sysConfig.SMTPPassword != "" {
-		settings.SMTPPassword = passwordMask
-	}
-	if sysConfig.SMTPBridgeTLSCertBase64 != "" {
-		settings.SMTPBridgeTLSCertBase64 = configuredMask
-	}
-	if sysConfig.SMTPBridgeTLSKeyBase64 != "" {
-		settings.SMTPBridgeTLSKeyBase64 = configuredMask
+	envOverrides := h.setupService.GetEnvOverrides()
+
+	// Env vars are authoritative and may differ from the values persisted to the DB at
+	// install time (e.g. an operator added a second ROOT_EMAIL, or changed SMTP_HOST,
+	// and restarted). GetSystemConfig only reflects the DB, so a field overridden by an
+	// env var would otherwise show a stale value in the (disabled) panel. For every
+	// env-overridden field, surface the live env value the rest of the app actually uses.
+	// Secrets are overlaid into local vars and masked below — never returned in clear.
+	smtpPassword := sysConfig.SMTPPassword
+	tlsCert := sysConfig.SMTPBridgeTLSCertBase64
+	tlsKey := sysConfig.SMTPBridgeTLSKeyBase64
+	if env := h.setupService.GetEnvConfig(); env != nil {
+		if envOverrides["root_email"] {
+			settings.RootEmail = env.RootEmail
+		}
+		if envOverrides["api_endpoint"] {
+			settings.APIEndpoint = env.APIEndpoint
+		}
+		if envOverrides["smtp_host"] {
+			settings.SMTPHost = env.SMTPHost
+		}
+		if envOverrides["smtp_port"] {
+			settings.SMTPPort = env.SMTPPort
+		}
+		if envOverrides["smtp_username"] {
+			settings.SMTPUsername = env.SMTPUsername
+		}
+		if envOverrides["smtp_from_email"] {
+			settings.SMTPFromEmail = env.SMTPFromEmail
+		}
+		if envOverrides["smtp_from_name"] {
+			settings.SMTPFromName = env.SMTPFromName
+		}
+		if envOverrides["smtp_use_tls"] {
+			settings.SMTPUseTLS = env.SMTPUseTLS != "false"
+		}
+		if envOverrides["smtp_ehlo_hostname"] {
+			settings.SMTPEHLOHostname = env.SMTPEHLOHostname
+		}
+		if envOverrides["smtp_bridge_enabled"] {
+			settings.SMTPBridgeEnabled = env.SMTPBridgeEnabled == "true"
+		}
+		if envOverrides["smtp_bridge_domain"] {
+			settings.SMTPBridgeDomain = env.SMTPBridgeDomain
+		}
+		if envOverrides["smtp_bridge_port"] {
+			settings.SMTPBridgePort = env.SMTPBridgePort
+		}
+		if envOverrides["smtp_password"] {
+			smtpPassword = env.SMTPPassword
+		}
+		if envOverrides["smtp_bridge_tls_cert_base64"] {
+			tlsCert = env.SMTPBridgeTLSCertBase64
+		}
+		if envOverrides["smtp_bridge_tls_key_base64"] {
+			tlsKey = env.SMTPBridgeTLSKeyBase64
+		}
 	}
 
-	envOverrides := h.setupService.GetEnvOverrides()
+	// Mask sensitive fields based on the effective (post-override) value
+	if smtpPassword != "" {
+		settings.SMTPPassword = passwordMask
+	}
+	if tlsCert != "" {
+		settings.SMTPBridgeTLSCertBase64 = configuredMask
+	}
+	if tlsKey != "" {
+		settings.SMTPBridgeTLSKeyBase64 = configuredMask
+	}
 
 	response := SystemSettingsResponse{
 		Settings:     settings,
