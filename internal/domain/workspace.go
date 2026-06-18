@@ -991,6 +991,11 @@ type WorkspaceRepository interface {
 	WithWorkspaceTransaction(ctx context.Context, workspaceID string, fn func(*sql.Tx) error) error
 }
 
+// ErrUserNotInWorkspace is returned (errors.Is-able) when a user has no membership
+// row for a workspace. Callers (e.g. the platform-admin override in AuthService) use
+// errors.Is to distinguish a plain "not a member" from a real database failure.
+var ErrUserNotInWorkspace = errors.New("user is not a member of the workspace")
+
 // ErrUnauthorized is returned when a user is not authorized to perform an action
 type ErrUnauthorized struct {
 	Message string

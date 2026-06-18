@@ -463,7 +463,8 @@ func (a *App) InitServices() error {
 			}
 			return a.config.Security.JWTSecret, nil
 		},
-		Logger: a.logger,
+		Logger:      a.logger,
+		IsRootEmail: a.config.IsRootEmail,
 	})
 
 	var err error

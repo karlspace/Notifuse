@@ -3257,3 +3257,74 @@ func TestWorkspaceHandler_HandleSetUserPermissions(t *testing.T) {
 		assert.Equal(t, "Failed to set user permissions", response["error"])
 	})
 }
+
+// --- Authorization denials map to 403 Forbidden (not a generic 500) ---
+
+func TestWorkspaceHandler_Get_Forbidden(t *testing.T) {
+	handler, workspaceService, _, secretKey, _ := setupTest(t)
+
+	// A non-member (non-root) is denied; the service surfaces the typed not-in-workspace
+	// error (wrapped, as GetWorkspace does in production).
+	workspaceService.EXPECT().
+		GetWorkspace(gomock.Any(), "workspace123").
+		Return(nil, fmt.Errorf("failed to authenticate user: %w", domain.ErrUserNotInWorkspace))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces.get?id=workspace123", nil)
+	req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+	w := httptest.NewRecorder()
+	handler.handleGet(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestWorkspaceHandler_Update_Forbidden(t *testing.T) {
+	handler, workspaceService, _, secretKey, _ := setupTest(t)
+
+	workspaceService.EXPECT().
+		UpdateWorkspace(gomock.Any(), "workspace123", "New Name", gomock.Any()).
+		Return(nil, &domain.ErrUnauthorized{Message: "user is not an owner of the workspace"})
+
+	reqBody := domain.UpdateWorkspaceRequest{
+		ID:       "workspace123",
+		Name:     "New Name",
+		Settings: domain.WorkspaceSettings{Timezone: "UTC", DefaultLanguage: "en", Languages: []string{"en"}},
+	}
+	body, err := json.Marshal(reqBody)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces.update", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+	w := httptest.NewRecorder()
+	handler.handleUpdate(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestWorkspaceHandler_Delete_Forbidden(t *testing.T) {
+	handler, workspaceService, _, secretKey, _ := setupTest(t)
+
+	workspaceService.EXPECT().
+		DeleteWorkspace(gomock.Any(), "workspace123").
+		Return(&domain.ErrUnauthorized{Message: "user is not an owner of the workspace"})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces.delete", bytes.NewBuffer([]byte(`{"id": "workspace123"}`)))
+	req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+	w := httptest.NewRecorder()
+	handler.handleDelete(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestWorkspaceHandler_HandleMembers_Forbidden(t *testing.T) {
+	handler, workspaceService, _, secretKey, _ := setupTest(t)
+
+	workspaceService.EXPECT().
+		GetWorkspaceMembersWithEmail(gomock.Any(), "workspace123").
+		Return(nil, &domain.ErrUnauthorized{Message: "You do not have access to this workspace"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces.members?id=workspace123", nil)
+	req.Header.Set("Authorization", "Bearer "+createTestToken(t, secretKey, "test-user"))
+	w := httptest.NewRecorder()
+	handler.handleMembers(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}

@@ -447,7 +447,7 @@ func (r *workspaceRepository) GetUserWorkspace(ctx context.Context, userID strin
 		&uw.UserID, &uw.WorkspaceID, &uw.Role, &uw.Permissions, &uw.CreatedAt, &uw.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("user is not a member of the workspace")
+		return nil, domain.ErrUserNotInWorkspace
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user workspace: %w", err)
