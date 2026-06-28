@@ -96,6 +96,7 @@ type App struct {
 
 	// Repositories
 	userRepo                      domain.UserRepository
+	fedRepo                       domain.FederatedIdentityRepository
 	workspaceRepo                 domain.WorkspaceRepository
 	authRepo                      domain.AuthRepository
 	settingRepo                   domain.SettingRepository
@@ -125,6 +126,7 @@ type App struct {
 	// Services
 	authService                      *service.AuthService
 	userService                      *service.UserService
+	oidcService                      *service.OIDCService
 	workspaceService                 *service.WorkspaceService
 	contactService                   *service.ContactService
 	listService                      *service.ListService
@@ -169,7 +171,8 @@ type App struct {
 	sendGridService  *service.SendGridService
 
 	// Cache
-	blogCache cache.Cache // Dedicated cache for blog rendering
+	blogCache         cache.Cache // Dedicated cache for blog rendering
+	oidcExchangeCache cache.Cache // One-time OIDC exchange codes (single-instance)
 
 	// HTTP handlers
 	mux    *http.ServeMux
@@ -318,7 +321,7 @@ func (a *App) InitDB() error {
 	}
 
 	// Initialize database schema if needed
-	if err := database.InitializeDatabase(db, a.config.RootEmail); err != nil {
+	if err := database.InitializeDatabase(db, a.config.RootEmails()); err != nil {
 		_ = db.Close()
 		return fmt.Errorf("failed to initialize database schema: %w", err)
 	}
@@ -408,6 +411,7 @@ func (a *App) InitRepositories() error {
 	}
 
 	a.userRepo = repository.NewUserRepository(a.db)
+	a.fedRepo = repository.NewFederatedIdentityRepository(a.db)
 	a.taskRepo = repository.NewTaskRepository(a.db)
 	a.authRepo = repository.NewSQLAuthRepository(a.db)
 	a.settingRepo = repository.NewSQLSettingRepository(a.db)
@@ -464,7 +468,8 @@ func (a *App) InitServices() error {
 			}
 			return a.config.Security.JWTSecret, nil
 		},
-		Logger: a.logger,
+		Logger:      a.logger,
+		IsRootEmail: a.config.IsRootEmail,
 	})
 
 	var err error
@@ -473,13 +478,21 @@ func (a *App) InitServices() error {
 	a.rateLimiter = ratelimiter.NewRateLimiter()
 
 	// Configure policies for different use cases
-	a.rateLimiter.SetPolicy("signin", 5, 5*time.Minute)           // Strict auth
-	a.rateLimiter.SetPolicy("verify", 5, 5*time.Minute)           // Strict auth
-	a.rateLimiter.SetPolicy("smtp", 5, 1*time.Minute)             // SMTP bridge
+	a.rateLimiter.SetPolicy("signin", 5, 5*time.Minute)              // Strict auth
+	a.rateLimiter.SetPolicy("verify", 5, 5*time.Minute)              // Strict auth
+	a.rateLimiter.SetPolicy("smtp", 5, 1*time.Minute)                // SMTP bridge
 	a.rateLimiter.SetPolicy("subscribe:email", 10, 1*time.Minute)    // Public subscribe by email
-	a.rateLimiter.SetPolicy("subscribe:ip", 50, 1*time.Minute)      // Public subscribe by IP
+	a.rateLimiter.SetPolicy("subscribe:ip", 50, 1*time.Minute)       // Public subscribe by IP
 	a.rateLimiter.SetPolicy("preferences:email", 20, 1*time.Minute)  // Public preferences by email
-	a.rateLimiter.SetPolicy("preferences:ip", 100, 1*time.Minute)   // Public preferences by IP
+	a.rateLimiter.SetPolicy("preferences:ip", 100, 1*time.Minute)    // Public preferences by IP
+	a.rateLimiter.SetPolicy("inbound:ip", 240, 1*time.Minute)        // Public inbound replies by source IP (generous; providers share IPs)
+	a.rateLimiter.SetPolicy("inbound:workspace", 120, 1*time.Minute) // Public inbound replies by workspace
+	// OIDC policies are registered UNCONDITIONALLY (even when OIDC is disabled):
+	// RateLimiter.Allow fails closed on an unknown namespace, so enabling OIDC at
+	// runtime (settings drawer → graceful restart) must not 429 every request.
+	a.rateLimiter.SetPolicy("oidc:start", 10, 1*time.Minute)    // start an SSO redirect, by IP
+	a.rateLimiter.SetPolicy("oidc:callback", 10, 1*time.Minute) // IdP callbacks, by IP
+	a.rateLimiter.SetPolicy("oidc:exchange", 10, 1*time.Minute) // one-time-code exchange, by IP
 
 	// Initialize user service
 	userServiceConfig := service.UserServiceConfig{
@@ -504,21 +517,32 @@ func (a *App) InitServices() error {
 	// Config tracks which values came from actual env vars (not database, not generated)
 	rootEmail, apiEndpoint, smtpHost, smtpUsername, smtpPassword, smtpFromEmail, smtpFromName, smtpPort, smtpUseTLS, smtpBridgeEnabled, smtpBridgeDomain, smtpBridgeTLSCertBase64, smtpBridgeTLSKeyBase64, smtpBridgePort := a.config.GetEnvValues()
 	envConfig := &service.EnvironmentConfig{
-		RootEmail:              rootEmail,
-		APIEndpoint:            apiEndpoint,
-		SMTPHost:               smtpHost,
-		SMTPPort:               smtpPort,
-		SMTPUsername:           smtpUsername,
-		SMTPPassword:           smtpPassword,
-		SMTPFromEmail:          smtpFromEmail,
-		SMTPFromName:           smtpFromName,
-		SMTPUseTLS:             smtpUseTLS,
+		RootEmail:               rootEmail,
+		APIEndpoint:             apiEndpoint,
+		SMTPHost:                smtpHost,
+		SMTPPort:                smtpPort,
+		SMTPUsername:            smtpUsername,
+		SMTPPassword:            smtpPassword,
+		SMTPFromEmail:           smtpFromEmail,
+		SMTPFromName:            smtpFromName,
+		SMTPUseTLS:              smtpUseTLS,
+		SMTPEHLOHostname:        a.config.EnvValues.SMTPEHLOHostname,
 		SMTPBridgeEnabled:       smtpBridgeEnabled,
 		SMTPBridgeDomain:        smtpBridgeDomain,
 		SMTPBridgePort:          smtpBridgePort,
 		SMTPBridgeTLSCertBase64: smtpBridgeTLSCertBase64,
 		SMTPBridgeTLSKeyBase64:  smtpBridgeTLSKeyBase64,
 		SMTPBridgeTLSMode:       a.config.EnvValues.SMTPBridgeTLSMode,
+
+		OIDCEnabled:         a.config.EnvValues.OIDCEnabled,
+		OIDCIssuerURL:       a.config.EnvValues.OIDCIssuerURL,
+		OIDCClientID:        a.config.EnvValues.OIDCClientID,
+		OIDCClientSecret:    a.config.EnvValues.OIDCClientSecret,
+		OIDCRedirectURI:     a.config.EnvValues.OIDCRedirectURI,
+		OIDCScopes:          a.config.EnvValues.OIDCScopes,
+		OIDCButtonLabel:     a.config.EnvValues.OIDCButtonLabel,
+		OIDCAutoCreateUsers: a.config.EnvValues.OIDCAutoCreateUsers,
+		OIDCAllowedDomains:  a.config.EnvValues.OIDCAllowedDomains,
 	}
 
 	a.setupService = service.NewSetupService(
@@ -530,6 +554,28 @@ func (a *App) InitServices() error {
 		nil, // No callback needed - server restarts after setup
 		envConfig,
 	)
+
+	// OIDC service (second session-minter alongside magic-code). Always constructed;
+	// IsEnabled() gates everything, and provider init is lazy + self-healing, so this
+	// is cheap even when OIDC is disabled. The exchange-code store is process-local
+	// (single-instance; multi-replica needs sticky sessions — see plan §6.D).
+	a.oidcExchangeCache = cache.NewInMemoryCache(30 * time.Second)
+	a.oidcService = service.NewOIDCService(service.OIDCServiceConfig{
+		UserRepo:              a.userRepo,
+		FederatedIdentityRepo: a.fedRepo,
+		AuthService:           a.authService,
+		OIDCConfig:            a.config.OIDC,
+		SessionExpiry:         30 * 24 * time.Hour, // match UserService session lifetime
+		RateLimiter:           a.rateLimiter,
+		ExchangeCache:         a.oidcExchangeCache,
+		SecretKey:             a.config.Security.SecretKey,
+		// Case-INSENSITIVE root matcher: the IdP-asserted email casing may differ from
+		// the configured ROOT_EMAIL, and a case-sensitive miss would silently disable
+		// the root-account privilege-escalation guard in resolveOrProvisionUser.
+		IsRootEmail:  a.config.IsRootEmailInsensitive,
+		IsProduction: a.config.IsProduction(),
+		Logger:                a.logger,
+	})
 
 	// Initialize template service
 	a.templateService = service.NewTemplateService(
@@ -653,6 +699,12 @@ func (a *App) InitServices() error {
 	// If task scheduler is disabled (e.g., in tests), also disable background task execution
 	a.taskService.SetAutoExecuteImmediate(a.config.TaskScheduler.Enabled)
 
+	// Execution mode is coupled to the internal scheduler: when this instance runs its own
+	// scheduler it executes due tasks in-process, instead of dispatching over HTTP to its own
+	// public ingress (which fails in single-pod-per-tenant topologies). When the scheduler is
+	// disabled (scale-out + external cron), HTTP dispatch is kept for fan-out across replicas.
+	a.taskService.SetDirectExecution(a.config.TaskScheduler.Enabled)
+
 	// Initialize transactional notification service
 	a.transactionalNotificationService = service.NewTransactionalNotificationService(
 		a.transactionalNotificationRepo,
@@ -673,6 +725,7 @@ func (a *App) InitServices() error {
 		a.workspaceRepo,
 		a.messageHistoryRepo,
 		a.contactRepo,
+		a.automationRepo,
 	)
 
 	// Initialize Supabase service (before workspace service)
@@ -690,8 +743,14 @@ func (a *App) InitServices() error {
 		a.logger,
 	)
 
-	// Initialize data feed fetcher for external data in broadcasts
-	a.dataFeedFetcher = broadcast.NewDataFeedFetcher(a.logger)
+	// Initialize data feed fetcher for external data in broadcasts.
+	// Uses an SSRF-protected HTTP client by default; private/loopback targets are
+	// only permitted when explicitly opted in via BROADCAST_DATA_FEED_ALLOW_PRIVATE_HOSTS.
+	if a.config.Broadcast.AllowPrivateDataFeedHosts {
+		a.dataFeedFetcher = broadcast.NewUnsafeDataFeedFetcher(a.logger)
+	} else {
+		a.dataFeedFetcher = broadcast.NewDataFeedFetcher(a.logger)
+	}
 
 	// Initialize broadcast service
 	a.broadcastService = service.NewBroadcastService(
@@ -934,6 +993,8 @@ func (a *App) InitServices() error {
 		queue.DefaultWorkerConfig(),
 		a.logger,
 	)
+	// Enable the stop-on-reply just-in-time guard for automation sends.
+	a.emailQueueWorker.SetAutomationRepo(a.automationRepo)
 
 	// Initialize automation service
 	a.automationService = service.NewAutomationService(
@@ -1068,6 +1129,11 @@ func (a *App) InitHandlers() error {
 		a.config,
 		getJWTSecret,
 		a.logger)
+	oidcHandler := httpHandler.NewOIDCHandler(
+		a.oidcService,
+		a.config,
+		a.rateLimiter,
+		a.logger)
 	rootHandler := httpHandler.NewRootHandler(
 		"console/dist",
 		"notification_center/dist",
@@ -1083,6 +1149,8 @@ func (a *App) InitHandlers() error {
 		a.workspaceRepo,
 		a.blogService,
 		a.blogCache,
+		a.config.OIDC.Enabled,
+		a.config.OIDC.ButtonLabel,
 	)
 	setupHandler := httpHandler.NewSetupHandler(
 		a.setupService,
@@ -1123,7 +1191,7 @@ func (a *App) InitHandlers() error {
 		a.config.Security.SecretKey,
 	)
 	transactionalHandler := httpHandler.NewTransactionalNotificationHandler(a.transactionalNotificationService, getJWTSecret, a.logger, a.config.IsDemo())
-	inboundWebhookEventHandler := httpHandler.NewInboundWebhookEventHandler(a.inboundWebhookEventService, getJWTSecret, a.logger)
+	inboundWebhookEventHandler := httpHandler.NewInboundWebhookEventHandler(a.inboundWebhookEventService, getJWTSecret, a.rateLimiter, a.logger)
 	webhookRegistrationHandler := httpHandler.NewWebhookRegistrationHandler(a.webhookRegistrationService, getJWTSecret, a.logger)
 	supabaseWebhookHandler := httpHandler.NewSupabaseWebhookHandler(a.supabaseService, a.logger)
 	messageHistoryHandler := httpHandler.NewMessageHistoryHandler(
@@ -1184,6 +1252,7 @@ func (a *App) InitHandlers() error {
 	setupHandler.RegisterRoutes(a.mux) // Setup handler first (should be accessible without auth)
 	settingsHandler.RegisterRoutes(a.mux)
 	userHandler.RegisterRoutes(a.mux)
+	oidcHandler.RegisterRoutes(a.mux)
 	workspaceHandler.RegisterRoutes(a.mux)
 	rootHandler.RegisterRoutes(a.mux)
 	contactHandler.RegisterRoutes(a.mux)
@@ -1417,6 +1486,10 @@ func (a *App) Shutdown(ctx context.Context) error {
 	if a.blogCache != nil {
 		a.logger.Info("Stopping blog cache...")
 		a.blogCache.Stop()
+	}
+
+	if a.oidcExchangeCache != nil {
+		a.oidcExchangeCache.Stop()
 	}
 
 	// Stop task scheduler first (before stopping server)
