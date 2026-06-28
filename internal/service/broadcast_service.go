@@ -163,10 +163,19 @@ func (s *BroadcastService) GetBroadcast(ctx context.Context, workspaceID, broadc
 func (s *BroadcastService) UpdateBroadcast(ctx context.Context, request *domain.UpdateBroadcastRequest) (*domain.Broadcast, error) {
 	// Authenticate user for workspace
 	var err error
-	ctx, _, _, err = s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		s.logger.WithField("broadcast_id", request.ID).Error("Failed to authenticate user for workspace")
 		return nil, fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for writing broadcasts
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeWrite) {
+		return nil, domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to broadcasts required",
+		)
 	}
 
 	// First, get the existing broadcast
@@ -202,10 +211,19 @@ func (s *BroadcastService) UpdateBroadcast(ctx context.Context, request *domain.
 func (s *BroadcastService) ListBroadcasts(ctx context.Context, params domain.ListBroadcastsParams) (*domain.BroadcastListResponse, error) {
 	// Authenticate user for workspace
 	var err error
-	ctx, _, _, err = s.authService.AuthenticateUserForWorkspace(ctx, params.WorkspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, params.WorkspaceID)
 	if err != nil {
 		s.logger.Error("Failed to authenticate user for workspace")
 		return nil, fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for reading broadcasts
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeRead) {
+		return nil, domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeRead,
+			"Insufficient permissions: read access to broadcasts required",
+		)
 	}
 
 	// Apply default values for pagination if not provided
@@ -254,10 +272,19 @@ func (s *BroadcastService) ListBroadcasts(ctx context.Context, params domain.Lis
 func (s *BroadcastService) ScheduleBroadcast(ctx context.Context, request *domain.ScheduleBroadcastRequest) error {
 	// Authenticate user for workspace
 	var err error
-	ctx, _, _, err = s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		s.logger.WithField("broadcast_id", request.ID).Error("Failed to authenticate user for workspace")
 		return fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for writing broadcasts
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeWrite) {
+		return domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to broadcasts required",
+		)
 	}
 
 	// Validate the request
@@ -444,10 +471,19 @@ func (s *BroadcastService) ScheduleBroadcast(ctx context.Context, request *domai
 func (s *BroadcastService) PauseBroadcast(ctx context.Context, request *domain.PauseBroadcastRequest) error {
 	// Authenticate user for workspace
 	var err error
-	ctx, _, _, err = s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		s.logger.WithField("broadcast_id", request.ID).Error("Failed to authenticate user for workspace")
 		return fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for writing broadcasts
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeWrite) {
+		return domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to broadcasts required",
+		)
 	}
 
 	// Validate the request
@@ -498,8 +534,8 @@ func (s *BroadcastService) PauseBroadcast(ctx context.Context, request *domain.P
 			return pauseErr
 		}
 		s.logger.WithFields(map[string]interface{}{
-			"broadcast_id":        broadcast.ID,
-			"paused_queue_count":  pausedCount,
+			"broadcast_id":       broadcast.ID,
+			"paused_queue_count": pausedCount,
 		}).Info("Broadcast paused successfully")
 
 		// Create an event with acknowledgment callback
@@ -554,10 +590,19 @@ func (s *BroadcastService) PauseBroadcast(ctx context.Context, request *domain.P
 func (s *BroadcastService) ResumeBroadcast(ctx context.Context, request *domain.ResumeBroadcastRequest) error {
 	// Authenticate user for workspace
 	var err error
-	ctx, _, _, err = s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		s.logger.WithField("broadcast_id", request.ID).Error("Failed to authenticate user for workspace")
 		return fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for writing broadcasts
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeWrite) {
+		return domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to broadcasts required",
+		)
 	}
 
 	// Validate the request
@@ -701,10 +746,19 @@ func (s *BroadcastService) ResumeBroadcast(ctx context.Context, request *domain.
 func (s *BroadcastService) CancelBroadcast(ctx context.Context, request *domain.CancelBroadcastRequest) error {
 	// Authenticate user for workspace
 	var err error
-	ctx, _, _, err = s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		s.logger.WithField("broadcast_id", request.ID).Error("Failed to authenticate user for workspace")
 		return fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for writing broadcasts
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeWrite) {
+		return domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to broadcasts required",
+		)
 	}
 
 	// Validate the request
@@ -761,7 +815,7 @@ func (s *BroadcastService) CancelBroadcast(ctx context.Context, request *domain.
 			return deleteErr
 		}
 		s.logger.WithFields(map[string]interface{}{
-			"broadcast_id":         broadcast.ID,
+			"broadcast_id":          broadcast.ID,
 			"cancelled_queue_count": cancelledCount,
 		}).Info("Broadcast cancelled successfully")
 
@@ -817,10 +871,19 @@ func (s *BroadcastService) CancelBroadcast(ctx context.Context, request *domain.
 func (s *BroadcastService) DeleteBroadcast(ctx context.Context, request *domain.DeleteBroadcastRequest) error {
 	// Authenticate user for workspace
 	var err error
-	ctx, _, _, err = s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		s.logger.WithField("broadcast_id", request.ID).Error("Failed to authenticate user for workspace")
 		return fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for writing broadcasts
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeWrite) {
+		return domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to broadcasts required",
+		)
 	}
 
 	// Validate the request
@@ -859,10 +922,19 @@ func (s *BroadcastService) DeleteBroadcast(ctx context.Context, request *domain.
 func (s *BroadcastService) SendToIndividual(ctx context.Context, request *domain.SendToIndividualRequest) error {
 	// Authenticate user for workspace
 	var err error
-	ctx, _, _, err = s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		s.logger.WithField("broadcast_id", request.BroadcastID).Error("Failed to authenticate user for workspace")
 		return fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for writing broadcasts
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeWrite) {
+		return domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to broadcasts required",
+		)
 	}
 
 	// Validate the request
@@ -957,11 +1029,8 @@ func (s *BroadcastService) SendToIndividual(ctx context.Context, request *domain
 
 	messageID := uuid.New().String()
 
-	// Use workspace CustomEndpointURL if provided, otherwise use the default API endpoint
-	endpoint := s.apiEndpoint
-	if workspace.Settings.CustomEndpointURL != nil && *workspace.Settings.CustomEndpointURL != "" {
-		endpoint = *workspace.Settings.CustomEndpointURL
-	}
+	// Resolve the tracking/base endpoint: custom endpoint if set, else the API endpoint.
+	endpoint := workspace.Settings.ResolveEndpoint(s.apiEndpoint)
 
 	trackingSettings := notifuse_mjml.TrackingSettings{
 		Endpoint:       endpoint,
@@ -980,8 +1049,9 @@ func (s *BroadcastService) SendToIndividual(ctx context.Context, request *domain
 	}
 
 	req := domain.TemplateDataRequest{
-		WorkspaceID:        request.WorkspaceID,
-		WorkspaceSecretKey: workspace.Settings.SecretKey,
+		WorkspaceID:         request.WorkspaceID,
+		WorkspaceSecretKey:  workspace.Settings.SecretKey,
+		WorkspaceWebsiteURL: workspace.Settings.WebsiteURL,
 		ContactWithList: domain.ContactWithList{
 			Contact:  contact,
 			ListID:   broadcast.Audience.List, // Use list from broadcast audience for unsubscribe URL
@@ -1009,11 +1079,11 @@ func (s *BroadcastService) SendToIndividual(ctx context.Context, request *domain
 	compileReq := domain.CompileTemplateRequest{
 		WorkspaceID:      request.WorkspaceID,
 		MessageID:        messageID,
-		VisualEditorTree: emailContent.VisualEditorTree,
 		TemplateData:     notifuse_mjml.MapOfAny(templateData),
 		TrackingSettings: trackingSettings,
 	}
-	compileReq.MjmlSource = emailContent.GetCodeModeMjmlSource()
+	// Wires the resolved variant's tree/source + its inbox-preview override.
+	emailContent.ApplyToCompileRequest(&compileReq, nil)
 	compiledTemplate, err := s.templateSvc.CompileTemplate(ctx, compileReq)
 	if err != nil {
 		s.logger.Error("Failed to compile template for broadcast")
@@ -1082,9 +1152,18 @@ func (s *BroadcastService) SendToIndividual(ctx context.Context, request *domain
 // GetTestResults retrieves A/B test results for a broadcast
 func (s *BroadcastService) GetTestResults(ctx context.Context, workspaceID, broadcastID string) (*domain.TestResultsResponse, error) {
 	// Authenticate user
-	ctx, _, _, err := s.authService.AuthenticateUserForWorkspace(ctx, workspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
+	}
+
+	// Check permission for reading broadcasts
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeRead) {
+		return nil, domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeRead,
+			"Insufficient permissions: read access to broadcasts required",
+		)
 	}
 
 	// Get broadcast
@@ -1168,9 +1247,18 @@ func (s *BroadcastService) GetTestResults(ctx context.Context, workspaceID, broa
 // SelectWinner manually selects the winning variation for an A/B test
 func (s *BroadcastService) SelectWinner(ctx context.Context, workspaceID, broadcastID, templateID string) error {
 	// Authenticate user
-	ctx, _, _, err := s.authService.AuthenticateUserForWorkspace(ctx, workspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return err
+	}
+
+	// Check permission for writing broadcasts
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeWrite) {
+		return domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to broadcasts required",
+		)
 	}
 
 	return s.repo.WithTransaction(ctx, workspaceID, func(tx *sql.Tx) error {
@@ -1263,10 +1351,21 @@ func (s *BroadcastService) RefreshGlobalFeed(ctx context.Context, request *domai
 	}
 
 	// Authenticate user for workspace
-	ctx, _, _, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		s.logger.WithField("broadcast_id", request.BroadcastID).Error("Failed to authenticate user for workspace")
 		return nil, fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for writing broadcasts. Fetching an arbitrary feed URL makes
+	// the server perform an outbound request on the caller's behalf, so it requires
+	// the same write access as creating or editing a broadcast.
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeWrite) {
+		return nil, domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to broadcasts required",
+		)
 	}
 
 	// Get the broadcast (needed for payload: broadcast name, audience list)
@@ -1352,10 +1451,21 @@ func (s *BroadcastService) TestRecipientFeed(ctx context.Context, request *domai
 	}
 
 	// Authenticate user for workspace
-	ctx, _, _, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
+	ctx, _, userWorkspace, err := s.authService.AuthenticateUserForWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		s.logger.WithField("broadcast_id", request.BroadcastID).Error("Failed to authenticate user for workspace")
 		return nil, fmt.Errorf("failed to authenticate user: %w", err)
+	}
+
+	// Check permission for writing broadcasts. Fetching an arbitrary feed URL makes
+	// the server perform an outbound request on the caller's behalf, so it requires
+	// the same write access as creating or editing a broadcast.
+	if !userWorkspace.HasPermission(domain.PermissionResourceBroadcasts, domain.PermissionTypeWrite) {
+		return nil, domain.NewPermissionError(
+			domain.PermissionResourceBroadcasts,
+			domain.PermissionTypeWrite,
+			"Insufficient permissions: write access to broadcasts required",
+		)
 	}
 
 	// Get the broadcast (needed for payload: broadcast name, audience list)

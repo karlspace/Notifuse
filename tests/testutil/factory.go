@@ -748,6 +748,29 @@ func (tdf *TestDataFactory) EnableEmailTracking(workspaceID string) error {
 	return tdf.workspaceRepo.Update(context.Background(), workspace)
 }
 
+// SetWorkspaceWebsiteURL sets the workspace's public Website URL (settings.website_url),
+// which is exposed to templates as {{ workspace.website_url }}.
+func (tdf *TestDataFactory) SetWorkspaceWebsiteURL(workspaceID, websiteURL string) error {
+	workspace, err := tdf.workspaceRepo.GetByID(context.Background(), workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get workspace: %w", err)
+	}
+	workspace.Settings.WebsiteURL = websiteURL
+	return tdf.workspaceRepo.Update(context.Background(), workspace)
+}
+
+// SetWorkspaceCustomEndpointURL sets the workspace's Custom Endpoint URL (the tracking
+// domain), which resolves into TrackingSettings.Endpoint and is exposed to templates as
+// {{ workspace.base_url }}. Writes directly via the repository to bypass DNS verification.
+func (tdf *TestDataFactory) SetWorkspaceCustomEndpointURL(workspaceID, endpointURL string) error {
+	workspace, err := tdf.workspaceRepo.GetByID(context.Background(), workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get workspace: %w", err)
+	}
+	workspace.Settings.CustomEndpointURL = &endpointURL
+	return tdf.workspaceRepo.Update(context.Background(), workspace)
+}
+
 // Option types for customizing test data
 type UserOption func(*domain.User)
 type WorkspaceOption func(*domain.Workspace)
@@ -1052,6 +1075,18 @@ func WithMessageHistoryChannel(channel string) MessageHistoryOption {
 	}
 }
 
+func WithMessageHistorySMTPMessageID(smtpMessageID string) MessageHistoryOption {
+	return func(m *domain.MessageHistory) {
+		m.SMTPMessageID = &smtpMessageID
+	}
+}
+
+func WithMessageHistoryAutomationID(automationID string) MessageHistoryOption {
+	return func(m *domain.MessageHistory) {
+		m.AutomationID = &automationID
+	}
+}
+
 // ContactList options
 func WithContactListEmail(email string) ContactListOption {
 	return func(cl *domain.ContactList) {
@@ -1315,6 +1350,84 @@ func CreateMJMLBlockWithContent(content string) notifuse_mjml.EmailBlock {
 		"id":         "mjml-1",
 		"type":       "mjml",
 		"children":   []interface{}{bodyBlockMap},
+		"attributes": map[string]interface{}{},
+	}
+
+	jsonData, err := json.Marshal(mjmlBlockMap)
+	if err != nil {
+		panic(err)
+	}
+
+	block, err := notifuse_mjml.UnmarshalEmailBlock(jsonData)
+	if err != nil {
+		panic(err)
+	}
+
+	return block
+}
+
+// CreateMJMLBlockWithContentAndPreview is like CreateMJMLBlockWithContent but also adds an
+// mj-head containing an mj-preview block seeded with previewContent. Useful for asserting that
+// the send-time subject-preview override updates an existing inbox-preview block at compile time.
+func CreateMJMLBlockWithContentAndPreview(content string, previewContent string) notifuse_mjml.EmailBlock {
+	previewBlockMap := map[string]interface{}{
+		"id":         "preview-1",
+		"type":       "mj-preview",
+		"content":    previewContent,
+		"children":   []interface{}{},
+		"attributes": map[string]interface{}{},
+	}
+
+	headBlockMap := map[string]interface{}{
+		"id":         "head-1",
+		"type":       "mj-head",
+		"children":   []interface{}{previewBlockMap},
+		"attributes": map[string]interface{}{},
+	}
+
+	textBlockMap := map[string]interface{}{
+		"id":      "text-1",
+		"type":    "mj-text",
+		"content": content,
+		"attributes": map[string]interface{}{
+			"color":    "#000000",
+			"fontSize": "14px",
+		},
+		"children": []interface{}{},
+	}
+
+	columnBlockMap := map[string]interface{}{
+		"id":       "column-1",
+		"type":     "mj-column",
+		"children": []interface{}{textBlockMap},
+		"attributes": map[string]interface{}{
+			"width": "100%",
+		},
+	}
+
+	sectionBlockMap := map[string]interface{}{
+		"id":       "section-1",
+		"type":     "mj-section",
+		"children": []interface{}{columnBlockMap},
+		"attributes": map[string]interface{}{
+			"backgroundColor": "#ffffff",
+			"padding":         "20px 0",
+		},
+	}
+
+	bodyBlockMap := map[string]interface{}{
+		"id":       "body-1",
+		"type":     "mj-body",
+		"children": []interface{}{sectionBlockMap},
+		"attributes": map[string]interface{}{
+			"backgroundColor": "#f4f4f4",
+		},
+	}
+
+	mjmlBlockMap := map[string]interface{}{
+		"id":         "mjml-1",
+		"type":       "mjml",
+		"children":   []interface{}{headBlockMap, bodyBlockMap},
 		"attributes": map[string]interface{}{},
 	}
 

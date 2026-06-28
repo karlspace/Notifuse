@@ -397,11 +397,8 @@ func (s *ListService) SubscribeToLists(ctx context.Context, payload *domain.Subs
 
 		messageID := uuid.New().String()
 
-		// Use workspace CustomEndpointURL if provided, otherwise use the default API endpoint
-		endpoint := s.apiEndpoint
-		if workspace.Settings.CustomEndpointURL != nil && *workspace.Settings.CustomEndpointURL != "" {
-			endpoint = *workspace.Settings.CustomEndpointURL
-		}
+		// Resolve the tracking/base endpoint: custom endpoint if set, else the API endpoint.
+		endpoint := workspace.Settings.ResolveEndpoint(s.apiEndpoint)
 
 		trackingSettings := notifuse_mjml.TrackingSettings{
 			Endpoint:       endpoint,
@@ -415,8 +412,9 @@ func (s *ListService) SubscribeToLists(ctx context.Context, payload *domain.Subs
 		}
 
 		req := domain.TemplateDataRequest{
-			WorkspaceID:        workspace.ID,
-			WorkspaceSecretKey: workspace.Settings.SecretKey,
+			WorkspaceID:         workspace.ID,
+			WorkspaceSecretKey:  workspace.Settings.SecretKey,
+			WorkspaceWebsiteURL: workspace.Settings.WebsiteURL,
 			ContactWithList: domain.ContactWithList{
 				Contact:  contact,
 				ListID:   listID,

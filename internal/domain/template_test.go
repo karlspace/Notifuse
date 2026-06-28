@@ -1738,6 +1738,11 @@ func TestBuildTemplateData(t *testing.T) {
 		// Check tracking data
 		assert.Equal(t, messageID, data["message_id"])
 
+		// Check workspace base URL
+		workspaceData, ok := data["workspace"].(MapOfAny)
+		assert.True(t, ok)
+		assert.Equal(t, apiEndpoint, workspaceData["base_url"])
+
 		// Check tracking pixel URL
 		trackingPixelURL, ok := data["tracking_opens_url"].(string)
 		assert.True(t, ok)
@@ -1763,6 +1768,24 @@ func TestBuildTemplateData(t *testing.T) {
 		assert.Contains(t, notificationCenterURL, "wid=ws-123")
 		assert.NotContains(t, notificationCenterURL, "action=") // Should not contain action parameter
 		assert.NotContains(t, notificationCenterURL, "lid=")    // Should not contain list ID
+
+		// Check one-click unsubscribe URL (RFC 8058). This is the URL placed in the
+		// List-Unsubscribe header and POSTed by mail clients. It MUST carry email_hmac:
+		// the public /unsubscribe-oneclick endpoint has no bearer token, so the service
+		// authenticates the request by verifying this HMAC against the workspace secret
+		// key. Without it the unsubscribe is rejected (see ListService.UnsubscribeFromLists).
+		oneclickURL, ok := data["oneclick_unsubscribe_url"].(string)
+		assert.True(t, ok)
+		assert.Contains(t, oneclickURL, "https://api.example.com/unsubscribe-oneclick")
+		parsedOneclick, parseErr := url.Parse(oneclickURL)
+		assert.NoError(t, parseErr)
+		oneclickQuery := parsedOneclick.Query()
+		assert.Equal(t, "test@example.com", oneclickQuery.Get("email"))
+		assert.Equal(t, "list-789", oneclickQuery.Get("lids"))
+		assert.Equal(t, "ws-123", oneclickQuery.Get("wid"))
+		assert.Equal(t, "msg-456", oneclickQuery.Get("mid"))
+		assert.Equal(t, ComputeEmailHMAC("test@example.com", workspaceSecretKey), oneclickQuery.Get("email_hmac"),
+			"one-click URL must include a valid email_hmac or the unsubscribe will be rejected by the service")
 	})
 
 	t.Run("with minimal data", func(t *testing.T) {
@@ -1875,6 +1898,57 @@ func TestBuildTemplateData(t *testing.T) {
 		assert.False(t, exists)
 		_, exists = data["confirm_subscription_url"]
 		assert.False(t, exists)
+
+		// Workspace base URL is present even without a broadcast
+		workspaceData, ok := data["workspace"].(MapOfAny)
+		assert.True(t, ok)
+		assert.Equal(t, "https://api.example.com", workspaceData["base_url"])
+	})
+
+	t.Run("workspace base url reflects custom endpoint and trims trailing slash", func(t *testing.T) {
+		// When a workspace sets a Custom Endpoint URL, the resolved value is
+		// passed through TrackingSettings.Endpoint and exposed as workspace.base_url.
+		// Any trailing slash is trimmed so templates can compose "{{ workspace.base_url }}/path".
+		req := TemplateDataRequest{
+			WorkspaceID:        "ws-123",
+			WorkspaceSecretKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			MessageID:          "msg-456",
+			TrackingSettings:   notifuse_mjml.TrackingSettings{Endpoint: "https://links.example.com/"},
+		}
+		data, err := BuildTemplateData(req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, data)
+
+		workspaceData, ok := data["workspace"].(MapOfAny)
+		assert.True(t, ok)
+		assert.Equal(t, "https://links.example.com", workspaceData["base_url"])
+		// website_url is independent from base_url and empty when not provided
+		assert.Equal(t, "", workspaceData["website_url"])
+	})
+
+	t.Run("workspace website_url is exposed independently and trims trailing slash", func(t *testing.T) {
+		// The workspace Website URL is the public application domain, distinct from the
+		// tracking endpoint (base_url). It is exposed as workspace.website_url so templates
+		// can compose application links like "{{ workspace.website_url }}/users/verify/xxx".
+		// A trailing slash is trimmed for clean concatenation.
+		req := TemplateDataRequest{
+			WorkspaceID:         "ws-123",
+			WorkspaceSecretKey:  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			WorkspaceWebsiteURL: "https://my-app.example.com/",
+			MessageID:           "msg-456",
+			TrackingSettings:    notifuse_mjml.TrackingSettings{Endpoint: "https://links.example.com"},
+		}
+		data, err := BuildTemplateData(req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, data)
+
+		workspaceData, ok := data["workspace"].(MapOfAny)
+		assert.True(t, ok)
+		// base_url stays the tracking endpoint; website_url is the application domain
+		assert.Equal(t, "https://links.example.com", workspaceData["base_url"])
+		assert.Equal(t, "https://my-app.example.com", workspaceData["website_url"])
 	})
 
 	// We'll skip other test cases since they would require mocking
@@ -1885,12 +1959,12 @@ func TestGenerateEmailRedirectionEndpoint(t *testing.T) {
 	testTimestamp := int64(1699564800)
 
 	tests := []struct {
-		name            string
-		workspaceID     string
-		messageID       string
-		apiEndpoint     string
-		destinationURL  string
-		expectedPrefix  string // The encrypted URL starts with this prefix
+		name           string
+		workspaceID    string
+		messageID      string
+		apiEndpoint    string
+		destinationURL string
+		expectedPrefix string // The encrypted URL starts with this prefix
 	}{
 		{
 			name:           "with all parameters",
@@ -2157,18 +2231,18 @@ func TestEmailTemplate_Validate_CodeMode(t *testing.T) {
 		{
 			name: "code mode with valid mjml_source",
 			template: &EmailTemplate{
-				EditorMode:  "code",
-				MjmlSource:  &validMjml,
-				Subject:     "Test Subject",
+				EditorMode: "code",
+				MjmlSource: &validMjml,
+				Subject:    "Test Subject",
 			},
 			wantErr: false,
 		},
 		{
 			name: "code mode with nil mjml_source",
 			template: &EmailTemplate{
-				EditorMode:  "code",
-				MjmlSource:  nil,
-				Subject:     "Test Subject",
+				EditorMode: "code",
+				MjmlSource: nil,
+				Subject:    "Test Subject",
 			},
 			wantErr: true,
 			errMsg:  "invalid email template: mjml_source is required for code mode",
@@ -2176,9 +2250,9 @@ func TestEmailTemplate_Validate_CodeMode(t *testing.T) {
 		{
 			name: "code mode with empty mjml_source",
 			template: &EmailTemplate{
-				EditorMode:  "code",
-				MjmlSource:  &emptyStr,
-				Subject:     "Test Subject",
+				EditorMode: "code",
+				MjmlSource: &emptyStr,
+				Subject:    "Test Subject",
 			},
 			wantErr: true,
 			errMsg:  "invalid email template: mjml_source is required for code mode",
@@ -2186,9 +2260,9 @@ func TestEmailTemplate_Validate_CodeMode(t *testing.T) {
 		{
 			name: "invalid editor_mode",
 			template: &EmailTemplate{
-				EditorMode:  "invalid",
-				MjmlSource:  &validMjml,
-				Subject:     "Test Subject",
+				EditorMode: "invalid",
+				MjmlSource: &validMjml,
+				Subject:    "Test Subject",
 			},
 			wantErr: true,
 			errMsg:  "invalid email template: editor_mode must be 'visual' or 'code'",
@@ -2331,10 +2405,10 @@ func TestTemplate_ResolveEmailContent(t *testing.T) {
 	}
 
 	tests := []struct {
-		name             string
-		contactLang      string
-		defaultLang      string
-		expectedSubject  string
+		name            string
+		contactLang     string
+		defaultLang     string
+		expectedSubject string
 	}{
 		{"empty contact language returns default", "", "en", "Default Subject"},
 		{"contact language matches default returns default", "en", "en", "Default Subject"},
@@ -2402,6 +2476,85 @@ func TestTemplate_ResolveWebContent(t *testing.T) {
 	})
 }
 
+func TestResolveSubjectPreviewOverride(t *testing.T) {
+	explicit := "explicit override"
+	empty := ""
+	contentPreview := "content preview"
+	content := &EmailTemplate{SubjectPreview: &contentPreview}
+
+	t.Run("explicit override wins", func(t *testing.T) {
+		got := ResolveSubjectPreviewOverride(&explicit, content)
+		assert.NotNil(t, got)
+		assert.Equal(t, "explicit override", *got)
+	})
+
+	t.Run("nil explicit falls back to resolved content", func(t *testing.T) {
+		got := ResolveSubjectPreviewOverride(nil, content)
+		assert.NotNil(t, got)
+		assert.Equal(t, "content preview", *got)
+	})
+
+	t.Run("empty explicit falls back to resolved content", func(t *testing.T) {
+		got := ResolveSubjectPreviewOverride(&empty, content)
+		assert.NotNil(t, got)
+		assert.Equal(t, "content preview", *got)
+	})
+
+	t.Run("nil content yields nil", func(t *testing.T) {
+		assert.Nil(t, ResolveSubjectPreviewOverride(nil, nil))
+	})
+
+	t.Run("content with nil preview yields nil", func(t *testing.T) {
+		assert.Nil(t, ResolveSubjectPreviewOverride(nil, &EmailTemplate{}))
+	})
+}
+
+func TestEmailTemplate_ApplyToCompileRequest(t *testing.T) {
+	preview := "variant preview"
+
+	t.Run("visual mode sets tree and preview override, leaves mjml source nil", func(t *testing.T) {
+		tree := createValidMJMLBlock()
+		e := &EmailTemplate{
+			EditorMode:       EditorModeVisual,
+			VisualEditorTree: tree,
+			SubjectPreview:   &preview,
+		}
+		var req CompileTemplateRequest
+		e.ApplyToCompileRequest(&req, nil)
+
+		assert.Equal(t, tree, req.VisualEditorTree)
+		assert.Nil(t, req.MjmlSource)
+		assert.NotNil(t, req.SubjectPreviewOverride)
+		assert.Equal(t, "variant preview", *req.SubjectPreviewOverride)
+	})
+
+	t.Run("code mode sets mjml source from the variant", func(t *testing.T) {
+		src := "<mjml></mjml>"
+		e := &EmailTemplate{
+			EditorMode:     EditorModeCode,
+			MjmlSource:     &src,
+			SubjectPreview: &preview,
+		}
+		var req CompileTemplateRequest
+		e.ApplyToCompileRequest(&req, nil)
+
+		assert.NotNil(t, req.MjmlSource)
+		assert.Equal(t, "<mjml></mjml>", *req.MjmlSource)
+		assert.NotNil(t, req.SubjectPreviewOverride)
+		assert.Equal(t, "variant preview", *req.SubjectPreviewOverride)
+	})
+
+	t.Run("explicit override takes precedence over variant preview", func(t *testing.T) {
+		explicit := "explicit override"
+		e := &EmailTemplate{SubjectPreview: &preview}
+		var req CompileTemplateRequest
+		e.ApplyToCompileRequest(&req, &explicit)
+
+		assert.NotNil(t, req.SubjectPreviewOverride)
+		assert.Equal(t, "explicit override", *req.SubjectPreviewOverride)
+	})
+}
+
 func TestTemplate_Validate_Translations(t *testing.T) {
 	validTree := createValidMJMLBlock()
 
@@ -2447,4 +2600,3 @@ func TestTemplate_Validate_Translations(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid translation language code")
 	})
 }
-

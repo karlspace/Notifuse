@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	// Import the notifuse_mjml package
@@ -111,21 +112,21 @@ func validateTranslations(translations map[string]TemplateTranslation, channel s
 }
 
 type Template struct {
-	ID              string                          `json:"id"`
-	Name            string                          `json:"name"`
-	Version         int64                           `json:"version"`
-	Channel         string                          `json:"channel"` // email or web
-	Email           *EmailTemplate                  `json:"email,omitempty"`
-	Web             *WebTemplate                    `json:"web,omitempty"`
-	Category        string                          `json:"category"`
-	TemplateMacroID *string                         `json:"template_macro_id,omitempty"`
-	IntegrationID   *string                         `json:"integration_id,omitempty"` // Set if template is managed by an integration (e.g., Supabase)
-	TestData        MapOfAny                        `json:"test_data,omitempty"`
-	Settings        MapOfAny                        `json:"settings,omitempty"` // Channels specific 3rd-party settings
-	Translations    map[string]TemplateTranslation  `json:"translations,omitempty"`
-	CreatedAt       time.Time                       `json:"created_at"`
-	UpdatedAt       time.Time                       `json:"updated_at"`
-	DeletedAt       *time.Time                      `json:"deleted_at,omitempty"`
+	ID              string                         `json:"id"`
+	Name            string                         `json:"name"`
+	Version         int64                          `json:"version"`
+	Channel         string                         `json:"channel"` // email or web
+	Email           *EmailTemplate                 `json:"email,omitempty"`
+	Web             *WebTemplate                   `json:"web,omitempty"`
+	Category        string                         `json:"category"`
+	TemplateMacroID *string                        `json:"template_macro_id,omitempty"`
+	IntegrationID   *string                        `json:"integration_id,omitempty"` // Set if template is managed by an integration (e.g., Supabase)
+	TestData        MapOfAny                       `json:"test_data,omitempty"`
+	Settings        MapOfAny                       `json:"settings,omitempty"` // Channels specific 3rd-party settings
+	Translations    map[string]TemplateTranslation `json:"translations,omitempty"`
+	CreatedAt       time.Time                      `json:"created_at"`
+	UpdatedAt       time.Time                      `json:"updated_at"`
+	DeletedAt       *time.Time                     `json:"deleted_at,omitempty"`
 }
 
 // ResolveEmailContent returns the EmailTemplate for the given contact language.
@@ -141,6 +142,40 @@ func (t *Template) ResolveEmailContent(contactLanguage string, workspaceDefaultL
 		return translation.Email
 	}
 	return t.Email
+}
+
+// ResolveSubjectPreviewOverride picks the preview text to inject into the mj-preview block at
+// compile time. An explicit caller-supplied override (e.g. transactional EmailOptions) wins;
+// otherwise it falls back to the resolved email content's own SubjectPreview. This guarantees a
+// translation renders its own inbox preview text even if its stored mj-preview block is stale.
+func ResolveSubjectPreviewOverride(explicit *string, content *EmailTemplate) *string {
+	if explicit != nil && *explicit != "" {
+		return explicit
+	}
+	if content != nil {
+		return content.SubjectPreview
+	}
+	return nil
+}
+
+// ApplyToCompileRequest fills the fields of a send-time compile request that derive from this email
+// variant: the visual editor tree, the code-mode MJML source, and the subject-preview override that
+// makes a translation render its OWN inbox preview text. Every outbound send (broadcast,
+// automation, transactional) must route the resolved email content through here so the preview
+// override travels with the body and cannot be forgotten — a send path that skips this call ends up
+// with no tree/source and fails compilation loudly instead of silently shipping a stale preview.
+// An explicit caller override (e.g. transactional EmailOptions.SubjectPreview) takes precedence over
+// the variant's own SubjectPreview.
+//
+// CONCURRENCY: req.VisualEditorTree shares e's tree by pointer, and CompileTemplate mutates that
+// tree's mj-preview block in place when the override is applied (visual mode only). This is safe
+// today because templates are loaded fresh per send (no shared template cache) and recipients
+// compile sequentially. If a shared template cache is ever introduced, clone the tree before
+// compiling concurrently — otherwise concurrent sends would race on the same mj-preview block.
+func (e *EmailTemplate) ApplyToCompileRequest(req *CompileTemplateRequest, explicitPreviewOverride *string) {
+	req.VisualEditorTree = e.VisualEditorTree
+	req.MjmlSource = e.GetCodeModeMjmlSource()
+	req.SubjectPreviewOverride = ResolveSubjectPreviewOverride(explicitPreviewOverride, e)
 }
 
 // ResolveWebContent returns the WebTemplate for the given contact language.
@@ -274,15 +309,15 @@ func (t TemplateReference) Value() (driver.Value, error) {
 }
 
 type EmailTemplate struct {
-	EditorMode       string                  `json:"editor_mode,omitempty"`
-	MjmlSource       *string                 `json:"mjml_source,omitempty"`
-	SenderID         string                  `json:"sender_id,omitempty"`
-	ReplyTo          string                  `json:"reply_to,omitempty"`
-	Subject          string                  `json:"subject"`
-	SubjectPreview   *string                 `json:"subject_preview,omitempty"`
-	CompiledPreview  string                  `json:"compiled_preview"` // compiled html
+	EditorMode       string                   `json:"editor_mode,omitempty"`
+	MjmlSource       *string                  `json:"mjml_source,omitempty"`
+	SenderID         string                   `json:"sender_id,omitempty"`
+	ReplyTo          string                   `json:"reply_to,omitempty"`
+	Subject          string                   `json:"subject"`
+	SubjectPreview   *string                  `json:"subject_preview,omitempty"`
+	CompiledPreview  string                   `json:"compiled_preview"` // compiled html
 	VisualEditorTree notifuse_mjml.EmailBlock `json:"visual_editor_tree"`
-	Text             *string                 `json:"text,omitempty"`
+	Text             *string                  `json:"text,omitempty"`
 }
 
 // GetCodeModeMjmlSource returns MjmlSource if the template is in code mode, nil otherwise.
@@ -485,17 +520,17 @@ func (w *WebTemplate) UnmarshalJSON(data []byte) error {
 
 // Request/Response types
 type CreateTemplateRequest struct {
-	WorkspaceID     string                          `json:"workspace_id"`
-	ID              string                          `json:"id"`
-	Name            string                          `json:"name"`
-	Channel         string                          `json:"channel"`
-	Email           *EmailTemplate                  `json:"email,omitempty"`
-	Web             *WebTemplate                    `json:"web,omitempty"`
-	Category        string                          `json:"category"`
-	TemplateMacroID *string                         `json:"template_macro_id,omitempty"`
-	TestData        MapOfAny                        `json:"test_data,omitempty"`
-	Settings        MapOfAny                        `json:"settings,omitempty"`
-	Translations    map[string]TemplateTranslation  `json:"translations,omitempty"`
+	WorkspaceID     string                         `json:"workspace_id"`
+	ID              string                         `json:"id"`
+	Name            string                         `json:"name"`
+	Channel         string                         `json:"channel"`
+	Email           *EmailTemplate                 `json:"email,omitempty"`
+	Web             *WebTemplate                   `json:"web,omitempty"`
+	Category        string                         `json:"category"`
+	TemplateMacroID *string                        `json:"template_macro_id,omitempty"`
+	TestData        MapOfAny                       `json:"test_data,omitempty"`
+	Settings        MapOfAny                       `json:"settings,omitempty"`
+	Translations    map[string]TemplateTranslation `json:"translations,omitempty"`
 }
 
 func (r *CreateTemplateRequest) Validate() (template *Template, workspaceID string, err error) {
@@ -639,17 +674,17 @@ func (r *GetTemplateRequest) FromURLParams(queryParams url.Values) (err error) {
 }
 
 type UpdateTemplateRequest struct {
-	WorkspaceID     string                          `json:"workspace_id"`
-	ID              string                          `json:"id"`
-	Name            string                          `json:"name"`
-	Channel         string                          `json:"channel"`
-	Email           *EmailTemplate                  `json:"email,omitempty"`
-	Web             *WebTemplate                    `json:"web,omitempty"`
-	Category        string                          `json:"category"`
-	TemplateMacroID *string                         `json:"template_macro_id,omitempty"`
-	TestData        MapOfAny                        `json:"test_data,omitempty"`
-	Settings        MapOfAny                        `json:"settings,omitempty"`
-	Translations    map[string]TemplateTranslation  `json:"translations,omitempty"`
+	WorkspaceID     string                         `json:"workspace_id"`
+	ID              string                         `json:"id"`
+	Name            string                         `json:"name"`
+	Channel         string                         `json:"channel"`
+	Email           *EmailTemplate                 `json:"email,omitempty"`
+	Web             *WebTemplate                   `json:"web,omitempty"`
+	Category        string                         `json:"category"`
+	TemplateMacroID *string                        `json:"template_macro_id,omitempty"`
+	TestData        MapOfAny                       `json:"test_data,omitempty"`
+	Settings        MapOfAny                       `json:"settings,omitempty"`
+	Translations    map[string]TemplateTranslation `json:"translations,omitempty"`
 }
 
 func (r *UpdateTemplateRequest) Validate() (template *Template, workspaceID string, err error) {
@@ -813,13 +848,14 @@ func (e *ErrEditorModeChange) Error() string {
 
 // TemplateDataRequest groups parameters for building template data
 type TemplateDataRequest struct {
-	WorkspaceID        string                         `json:"workspace_id"`
-	WorkspaceSecretKey string                         `json:"workspace_secret_key"`
-	ContactWithList    ContactWithList                `json:"contact_with_list"`
-	MessageID          string                         `json:"message_id"`
-	ProvidedData       MapOfAny                       `json:"provided_data,omitempty"`
-	TrackingSettings   notifuse_mjml.TrackingSettings `json:"tracking_settings"`
-	Broadcast          *Broadcast                     `json:"broadcast,omitempty"`
+	WorkspaceID         string                         `json:"workspace_id"`
+	WorkspaceSecretKey  string                         `json:"workspace_secret_key"`
+	WorkspaceWebsiteURL string                         `json:"workspace_website_url,omitempty"`
+	ContactWithList     ContactWithList                `json:"contact_with_list"`
+	MessageID           string                         `json:"message_id"`
+	ProvidedData        MapOfAny                       `json:"provided_data,omitempty"`
+	TrackingSettings    notifuse_mjml.TrackingSettings `json:"tracking_settings"`
+	Broadcast           *Broadcast                     `json:"broadcast,omitempty"`
 }
 
 // Validate ensures that the template data request has all required fields
@@ -928,9 +964,13 @@ func BuildTemplateData(req TemplateDataRequest) (MapOfAny, error) {
 			req.TrackingSettings.Endpoint, unsubscribeParams.Encode())
 		templateData["unsubscribe_url"] = unsubscribeURL
 
-		// Build oneclick unsubscribe URL query params
+		// Build oneclick unsubscribe URL query params.
+		// email_hmac is required: the public /unsubscribe-oneclick endpoint has no
+		// bearer token, so ListService.UnsubscribeFromLists authenticates the request
+		// by verifying this HMAC against the workspace secret key (RFC 8058 one-click).
 		oneclickParams := url.Values{}
 		oneclickParams.Set("email", req.ContactWithList.Contact.Email)
+		oneclickParams.Set("email_hmac", emailHMAC)
 		oneclickParams.Set("lids", req.ContactWithList.ListID)
 		oneclickParams.Set("wid", req.WorkspaceID)
 		oneclickParams.Set("mid", req.MessageID)
@@ -959,6 +999,13 @@ func BuildTemplateData(req TemplateDataRequest) (MapOfAny, error) {
 		templateData["global_feed"] = req.Broadcast.DataFeed.GlobalFeedData
 	}
 
+	// Expose workspace URLs for composing links from relative paths.
+	//   - base_url: the tracking endpoint (resolved CustomEndpointURL, or API endpoint fallback),
+	//     used for unsubscribe/tracking/notification-center links on the Notifuse domain.
+	//   - website_url: the workspace's public Website URL, for composing application links
+	//     (e.g. "{{ workspace.website_url }}/users/verify/xxx").
+	templateData["workspace"] = BuildWorkspaceTemplateVars(req.TrackingSettings.Endpoint, req.WorkspaceWebsiteURL)
+
 	// Add tracking data
 	templateData["message_id"] = req.MessageID
 
@@ -976,4 +1023,16 @@ func BuildTemplateData(req TemplateDataRequest) (MapOfAny, error) {
 	templateData["tracking_opens_url"] = trackingPixelURL
 
 	return templateData, nil
+}
+
+// BuildWorkspaceTemplateVars builds the `workspace` template object exposing the
+// base URL and website URL for composing links from relative paths. Trailing
+// slashes are trimmed so templates can write "{{ workspace.base_url }}/path".
+// Shared by BuildTemplateData (send time) and the template compile/preview path
+// so both render identical values.
+func BuildWorkspaceTemplateVars(baseURL, websiteURL string) MapOfAny {
+	return MapOfAny{
+		"base_url":    strings.TrimRight(baseURL, "/"),
+		"website_url": strings.TrimRight(websiteURL, "/"),
+	}
 }

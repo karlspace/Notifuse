@@ -98,6 +98,7 @@ func (s *queueMessageSender) SendBatch(
 	integrationID string,
 	workspaceSecretKey string,
 	endpoint string,
+	websiteURL string,
 	trackingEnabled bool,
 	broadcastID string,
 	recipients []*domain.ContactWithList,
@@ -164,12 +165,13 @@ func (s *queueMessageSender) SendBatch(
 
 		// Build template data with all system variables (unsubscribe_url, notification_center_url, etc.)
 		req := domain.TemplateDataRequest{
-			WorkspaceID:        workspaceID,
-			WorkspaceSecretKey: workspaceSecretKey,
-			ContactWithList:    *recipient,
-			MessageID:          messageID,
-			TrackingSettings:   trackingSettings,
-			Broadcast:          broadcast,
+			WorkspaceID:         workspaceID,
+			WorkspaceSecretKey:  workspaceSecretKey,
+			WorkspaceWebsiteURL: websiteURL,
+			ContactWithList:     *recipient,
+			MessageID:           messageID,
+			TrackingSettings:    trackingSettings,
+			Broadcast:           broadcast,
 		}
 		data, err := domain.BuildTemplateData(req)
 		if err != nil {
@@ -313,11 +315,11 @@ func (s *queueMessageSender) buildQueueEntry(
 	compileReq := notifuse_mjml.CompileTemplateRequest{
 		WorkspaceID:      workspaceID,
 		MessageID:        messageID,
-		VisualEditorTree: emailContent.VisualEditorTree,
 		TemplateData:     data,
 		TrackingSettings: trackingSettings,
 	}
-	compileReq.MjmlSource = emailContent.GetCodeModeMjmlSource()
+	// Wires the resolved variant's tree/source + its inbox-preview override.
+	emailContent.ApplyToCompileRequest(&compileReq, nil)
 	compiledTemplate, err := notifuse_mjml.CompileTemplate(compileReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile template: %w", err)
